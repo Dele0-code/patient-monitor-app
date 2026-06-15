@@ -1,0 +1,1128 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+
+// ============================================================================
+// SVG Icon Components (Inline to eliminate external package load issues)
+// ============================================================================
+const HeartIcon = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+  </svg>
+);
+
+const ActivityIcon = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+  </svg>
+);
+
+const ThermometerIcon = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z" />
+  </svg>
+);
+
+const WindIcon = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2" />
+  </svg>
+);
+
+const ShieldIcon = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+  </svg>
+);
+
+const PlayIcon = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="6 3 20 12 6 21 6 3" />
+  </svg>
+);
+
+const PauseIcon = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="14" y="4" width="4" height="16" rx="1" />
+    <rect x="6" y="4" width="4" height="16" rx="1" />
+  </svg>
+);
+
+const FileTextIcon = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+    <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+    <path d="M10 9H8" />
+    <path d="M16 13H8" />
+    <path d="M16 17H8" />
+  </svg>
+);
+
+const DownloadIcon = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" x2="12" y1="15" y2="3" />
+  </svg>
+);
+
+const AlertTriangleIcon = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+    <line x1="12" x2="12" y1="9" y2="13" />
+    <line x1="12" x2="12.01" y1="17" y2="17" />
+  </svg>
+);
+
+const BellIcon = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+  </svg>
+);
+
+const BellOffIcon = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    <path d="M18.63 13A17.89 17.89 0 0 1 18 8" />
+    <path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14" />
+    <path d="M18 8a6 6 0 0 0-9.33-5" />
+    <line x1="1" x2="23" y1="1" y2="23" />
+  </svg>
+);
+
+const Volume2Icon = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+  </svg>
+);
+
+const VolumeXIcon = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+    <line x1="22" x2="16" y1="9" y2="15" />
+    <line x1="16" x2="22" y1="9" y2="15" />
+  </svg>
+);
+
+// ============================================================================
+// Main Dashboard Component
+// ============================================================================
+export default function PatientMonitor() {
+  // --- STATE DEFINITIONS ---
+  const [heartRate, setHeartRate] = useState(72);
+  const [spo2, setSpo2] = useState(98);
+  const [temp, setTemp] = useState(36.8);
+  const [etco2, setEtco2] = useState(38);
+  const [nibpSys, setNibpSys] = useState(120);
+  const [nibpDia, setNibpDia] = useState(80);
+  const [arrhythmia, setArrhythmia] = useState('Normal Sinus');
+  
+  // Audio state
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  
+  // Interactive control states
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [alarmActive, setAlarmActive] = useState(false);
+  const [alarmType, setAlarmType] = useState('NONE');
+  const [showReport, setShowReport] = useState(false);
+  
+  // Time and historical values for summary table & export
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [historicalData, setHistoricalData] = useState([]);
+  
+  // References for ECG animation and Audio Synthesis
+  const canvasRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  
+  // Track parameters across renders for animation sync
+  const hrRef = useRef(heartRate);
+  const alarmRef = useRef(alarmActive);
+  const audioEnabledRef = useRef(audioEnabled);
+  
+  // Synchronize refs with state to prevent closure stale values in loops
+  useEffect(() => { hrRef.current = heartRate; }, [heartRate]);
+  useEffect(() => { alarmRef.current = alarmActive; }, [alarmActive]);
+  useEffect(() => { audioEnabledRef.current = audioEnabled; }, [audioEnabled]);
+
+  // --- AUDIO SYNTHESIS FUNCTIONS ---
+  const initAudio = useCallback(() => {
+    if (!audioCtxRef.current) {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (AudioContext) {
+        audioCtxRef.current = new AudioContext();
+      }
+    }
+    if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+      audioCtxRef.current.resume();
+    }
+  }, []);
+
+  const triggerBeep = useCallback((freq, duration, volume = 0.05) => {
+    if (!audioEnabledRef.current) return;
+    try {
+      initAudio();
+      const ctx = audioCtxRef.current;
+      if (!ctx || ctx.state === 'suspended') return;
+      
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+      
+      gainNode.gain.setValueAtTime(volume, ctx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+      
+      osc.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      osc.start();
+      osc.stop(ctx.currentTime + duration);
+    } catch (e) {
+      console.warn("Web Audio failed to execute:", e);
+    }
+  }, [initAudio]);
+
+  // --- REAL-TIME VITAL SIMULATION ---
+  // Every 2 seconds, update vitals.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Small variation helper
+      const getVariation = (min, max) => Math.random() * (max - min) + min;
+      
+      if (alarmActive) {
+        // Alarm simulations
+        if (alarmType === 'V-TACH') {
+          setHeartRate(prev => Math.min(175, Math.max(155, Math.round(prev + getVariation(-3, 3)))));
+          setSpo2(prev => Math.max(91, Math.min(94, Math.round(prev + getVariation(-0.5, 0.5)))));
+          setEtco2(prev => Math.max(30, Math.min(34, Math.round(prev + getVariation(-1, 1)))));
+          setTemp(prev => Math.max(36.4, Math.min(37.0, parseFloat((prev + getVariation(-0.05, 0.05)).toFixed(1)))));
+          setNibpSys(prev => Math.max(85, Math.min(95, Math.round(prev + getVariation(-2, 2)))));
+          setNibpDia(prev => Math.max(50, Math.min(58, Math.round(prev + getVariation(-1, 1)))));
+          setArrhythmia('Vent. Tachycardia');
+        } else if (alarmType === 'HYPOXIA') {
+          setHeartRate(prev => Math.min(125, Math.max(105, Math.round(prev + getVariation(-2, 2)))));
+          setSpo2(prev => Math.max(84, Math.min(88, Math.round(prev + getVariation(-1, 1)))));
+          setEtco2(prev => Math.max(45, Math.min(50, Math.round(prev + getVariation(-1, 1)))));
+          setTemp(prev => Math.max(36.5, Math.min(37.2, parseFloat((prev + getVariation(-0.05, 0.05)).toFixed(1)))));
+          setNibpSys(prev => Math.max(130, Math.min(145, Math.round(prev + getVariation(-3, 3)))));
+          setNibpDia(prev => Math.max(85, Math.min(95, Math.round(prev + getVariation(-2, 2)))));
+          setArrhythmia('Sinus Tachycardia');
+        } else if (alarmType === 'FEVER') {
+          setHeartRate(prev => Math.min(115, Math.max(100, Math.round(prev + getVariation(-2, 2)))));
+          setSpo2(prev => Math.max(95, Math.min(97, Math.round(prev + getVariation(-0.5, 0.5)))));
+          setEtco2(prev => Math.max(42, Math.min(46, Math.round(prev + getVariation(-1, 1)))));
+          setTemp(prev => Math.min(39.7, Math.max(39.1, parseFloat((prev + getVariation(-0.1, 0.1)).toFixed(1)))));
+          setNibpSys(prev => Math.max(118, Math.min(128, Math.round(prev + getVariation(-2, 2)))));
+          setNibpDia(prev => Math.max(76, Math.min(84, Math.round(prev + getVariation(-1, 1)))));
+          setArrhythmia('Normal Sinus');
+        }
+      } else {
+        // Normal state simulation
+        setHeartRate(prev => {
+          const target = 72;
+          const delta = target - prev;
+          const step = delta > 0 ? getVariation(-1, 3) : getVariation(-3, 1);
+          return Math.min(90, Math.max(60, Math.round(prev + step)));
+        });
+        setSpo2(prev => {
+          const chance = Math.random();
+          if (chance > 0.8) return Math.min(100, Math.max(97, prev + (Math.random() > 0.5 ? 1 : -1)));
+          return prev;
+        });
+        setTemp(prev => {
+          const change = getVariation(-0.05, 0.05);
+          return Math.min(37.4, Math.max(36.2, parseFloat((prev + change).toFixed(1))));
+        });
+        setEtco2(prev => {
+          const change = Math.round(getVariation(-1, 1.5));
+          return Math.min(42, Math.max(35, prev + change));
+        });
+        setNibpSys(prev => {
+          const change = Math.round(getVariation(-2, 2));
+          return Math.min(130, Math.max(110, prev + change));
+        });
+        setNibpDia(prev => {
+          const change = Math.round(getVariation(-1.5, 1.5));
+          return Math.min(85, Math.max(70, prev + change));
+        });
+        setArrhythmia('Normal Sinus');
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [alarmActive, alarmType]);
+
+  // Log vitals periodically when recording or just to keep history (last 15 entries)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const logEntry = {
+        time: new Date().toLocaleTimeString(),
+        hr: hrRef.current,
+        spo2,
+        temp,
+        etco2,
+        nibp: `${nibpSys}/${nibpDia}`,
+        arrhythmia,
+        alarm: alarmActive ? alarmType : 'NONE'
+      };
+      
+      setHistoricalData(prev => {
+        const updated = [...prev, logEntry];
+        if (updated.length > 20) {
+          updated.shift();
+        }
+        return updated;
+      });
+      
+      if (isRecording) {
+        setRecordingDuration(d => d + 2);
+      }
+    }, 2000);
+    
+    return () => clearInterval(interval);
+  }, [spo2, temp, etco2, nibpSys, nibpDia, arrhythmia, alarmActive, alarmType, isRecording]);
+
+  // Live ticking clock (every 1 second)
+  useEffect(() => {
+    const clock = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(clock);
+  }, []);
+
+  // Alarm sound rhythm generator (pulsed tones when alarm is active)
+  useEffect(() => {
+    let alarmSoundInterval;
+    if (alarmActive) {
+      alarmSoundInterval = setInterval(() => {
+        // High urgency 3-beep alarm pattern: beep-beep-beep
+        triggerBeep(988, 0.08, 0.08); // B5 note
+        setTimeout(() => triggerBeep(988, 0.08, 0.08), 120);
+        setTimeout(() => triggerBeep(988, 0.08, 0.08), 240);
+      }, 900); // repeat every 0.9s
+    }
+    return () => {
+      if (alarmSoundInterval) clearInterval(alarmSoundInterval);
+    };
+  }, [alarmActive, triggerBeep]);
+
+  // --- ECG WAVEFORM ANIMATION ---
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animationId;
+    let lastTime = performance.now();
+    let currentX = 0;
+    
+    // Canvas dimension setup
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    const width = rect.width;
+    const height = rect.height;
+    const baselineY = height / 2;
+    
+    // Wave parameters
+    let lastY = baselineY;
+    let beatTime = 0; // seconds elapsed in the current cardiac cycle
+    
+    // Draw the ECG grid background once on load, but since we scan and erase, 
+    // it's best to draw the grid continuously in a separate backdrop or as a background CSS.
+    // We will clear the screen ahead of the scanner. To keep the grid visible, we let the CSS background
+    // handle the grid and we clear with transparency on the canvas.
+    ctx.clearRect(0, 0, width, height);
+
+    // ECG wave generator function based on physiological components: P-Q-R-S-T
+    const getEcgVoltage = (t) => {
+      // Physiological intervals (seconds):
+      // P wave: duration 0.08, starts at 0.02
+      // Q wave: sharp negative deflection, starts at 0.12
+      // R wave: sharp positive deflection (QRS), starts at 0.14
+      // S wave: sharp negative deflection, starts at 0.17
+      // T wave: slow positive deflection, starts at 0.24
+      if (t >= 0.02 && t < 0.10) {
+        // P wave
+        return 0.12 * Math.sin(Math.PI * (t - 0.02) / 0.08);
+      }
+      if (t >= 0.12 && t < 0.14) {
+        // Q wave
+        return -0.15 * Math.sin(Math.PI * (t - 0.12) / 0.02);
+      }
+      if (t >= 0.14 && t < 0.17) {
+        // R wave (QRS spike)
+        return 1.25 * Math.sin(Math.PI * (t - 0.14) / 0.03);
+      }
+      if (t >= 0.17 && t < 0.21) {
+        // S wave
+        return -0.35 * Math.sin(Math.PI * (t - 0.17) / 0.04);
+      }
+      if (t >= 0.24 && t < 0.40) {
+        // T wave
+        return 0.25 * Math.sin(Math.PI * (t - 0.24) / 0.16);
+      }
+      return 0.0; // flat Isoelectric line
+    };
+
+    const render = (time) => {
+      const dt = (time - lastTime) / 1000; // time delta in seconds
+      lastTime = time;
+      
+      const hr = hrRef.current;
+      const beatDuration = 60 / hr; // duration of one beat in seconds
+      
+      // Accumulate cardiac phase
+      const prevBeatTime = beatTime;
+      beatTime += dt;
+      
+      if (beatTime >= beatDuration) {
+        beatTime -= beatDuration;
+        // Trigger sound beep on R-wave peak crossing (R is at t=0.15)
+        if (!alarmRef.current) {
+          // Normal soft sonar chirp
+          triggerBeep(523.25, 0.05, 0.03); // C5 note
+        }
+      }
+      
+      // Calculate drawing speed (25 mm/s = 250 px/s)
+      const speed = 180; // pixels per second
+      const dx = speed * dt;
+      const nextX = (currentX + dx) % width;
+      
+      // Calculate ECG voltage at this point
+      const voltage = getEcgVoltage(beatTime);
+      
+      // Map voltage to y coordinate (Gain: 10 mm/mV -> scale factor of 45px per mV)
+      const gainScale = 45; 
+      const nextY = baselineY - (voltage * gainScale);
+      
+      // Set canvas line styles
+      ctx.strokeStyle = '#22c55e'; // Bright hospital green
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      // Apply neon glow effect
+      ctx.shadowBlur = 4;
+      ctx.shadowColor = '#22c55e';
+      
+      if (nextX < currentX) {
+        // Scanner wrapped around. Clear first eraser block at 0
+        ctx.clearRect(0, 0, 15, height);
+        ctx.beginPath();
+        ctx.moveTo(nextX, nextY);
+      } else {
+        // Normal sweep drawing line
+        ctx.beginPath();
+        ctx.moveTo(currentX, lastY);
+        ctx.lineTo(nextX, nextY);
+        ctx.stroke();
+        
+        // Eraser bar: Clears old drawing 25px ahead of current scanner position
+        const eraserWidth = 25;
+        ctx.shadowBlur = 0; // Disable glow for transparent eraser
+        ctx.clearRect(nextX, 0, eraserWidth, height);
+        
+        // Redraw vertical scan indicator (soft green line at eraser border)
+        ctx.fillStyle = 'rgba(34, 197, 94, 0.08)';
+        ctx.fillRect(nextX + eraserWidth - 2, 0, 2, height);
+      }
+      
+      currentX = nextX;
+      lastY = nextY;
+      
+      animationId = requestAnimationFrame(render);
+    };
+
+    animationId = requestAnimationFrame(render);
+    
+    // Resize handler
+    const handleResize = () => {
+      const rectSize = canvas.getBoundingClientRect();
+      canvas.width = rectSize.width * dpr;
+      canvas.height = rectSize.height * dpr;
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, rectSize.width, rectSize.height);
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      cancelAnimationFrame(animationId);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [triggerBeep]);
+
+  // --- ACTIONS ---
+  const handleToggleRecording = () => {
+    initAudio();
+    setIsRecording(!isRecording);
+    if (!isRecording) {
+      setRecordingDuration(0);
+    }
+  };
+
+  const handleSimulateAlarm = () => {
+    initAudio();
+    const scenarios = ['V-TACH', 'HYPOXIA', 'FEVER'];
+    const selected = scenarios[Math.floor(Math.random() * scenarios.length)];
+    setAlarmActive(true);
+    setAlarmType(selected);
+  };
+
+  const handleClearAlarm = () => {
+    initAudio();
+    setAlarmActive(false);
+    setAlarmType('NONE');
+    
+    // Softly return vitals back to normal
+    setHeartRate(72);
+    setSpo2(98);
+    setTemp(36.8);
+    setEtco2(38);
+    setNibpSys(120);
+    setNibpDia(80);
+    setArrhythmia('Normal Sinus');
+  };
+
+  const handleExportCSV = () => {
+    let dataToExport = historicalData;
+    
+    // Provide fallback mock data if they haven't run the app long enough to record logs
+    if (dataToExport.length === 0) {
+      dataToExport = Array.from({ length: 10 }, (_, i) => {
+        const time = new Date(Date.now() - (10 - i) * 2000).toLocaleTimeString();
+        return {
+          time,
+          hr: 70 + Math.round(Math.random() * 5),
+          spo2: 98 + (Math.random() > 0.7 ? -1 : 0),
+          temp: 36.7 + parseFloat((Math.random() * 0.2).toFixed(1)),
+          etco2: 37 + Math.round(Math.random() * 2),
+          nibp: '121/79',
+          arrhythmia: 'Normal Sinus',
+          alarm: 'NONE'
+        };
+      });
+    }
+
+    const headers = ['Timestamp', 'Heart Rate (BPM)', 'SpO2 (%)', 'Temp (C)', 'EtCO2 (mmHg)', 'NIBP (mmHg)', 'Rhythm', 'Alarm Status'];
+    const csvRows = [
+      headers.join(','),
+      ...dataToExport.map(row => 
+        `"${row.time}",${row.hr},${row.spo2},${row.temp},${row.etco2},"${row.nibp}","${row.arrhythmia}","${row.alarm}"`
+      )
+    ];
+
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `patient_vitals_PT-004821_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Safe formatting for date
+  const formatDate = (date) => {
+    return date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  const formatDuration = (seconds) => {
+    const min = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const sec = (seconds % 60).toString().padStart(2, '0');
+    return `${min}:${sec}`;
+  };
+
+  // Calculate status tags for summary card alerts
+  const hrAlert = heartRate > 100 || heartRate < 55;
+  const spo2Alert = spo2 < 95;
+  const tempAlert = temp > 37.8 || temp < 35.8;
+  const etco2Alert = etco2 > 45 || etco2 < 34;
+  const nibpAlert = nibpSys > 140 || nibpSys < 90 || nibpDia > 90 || nibpDia < 55;
+  const rhythmAlert = arrhythmia !== 'Normal Sinus';
+
+  return (
+    <div className={`min-h-screen text-slate-100 flex flex-col justify-between font-mono select-none p-3 transition-colors duration-500 ${alarmActive ? 'bg-red-950/20 border-4 border-red-600 animate-pulse-border' : 'bg-slate-950'}`}>
+      
+      {/* --- DASHBOARD HEADER --- */}
+      <header className="bg-slate-900 border border-slate-800 rounded-lg p-3 flex flex-wrap justify-between items-center shadow-lg gap-4">
+        <div className="flex flex-wrap items-center gap-6">
+          {/* Patient Details */}
+          <div>
+            <div className="text-[10px] text-slate-500 uppercase tracking-widest">PATIENT ID</div>
+            <div className="text-emerald-400 font-bold text-lg">PT-004821</div>
+          </div>
+          <div>
+            <div className="text-[10px] text-slate-500 uppercase tracking-widest">PATIENT NAME</div>
+            <div className="text-white font-bold text-lg">Adebayo, K.</div>
+          </div>
+          <div>
+            <div className="text-[10px] text-slate-500 uppercase tracking-widest">AGE / GENDER</div>
+            <div className="text-slate-200 text-lg">34 yrs / Male</div>
+          </div>
+          <div>
+            <div className="text-[10px] text-slate-500 uppercase tracking-widest">ROOM</div>
+            <div className="text-rose-400 font-bold text-lg">ICU-07</div>
+          </div>
+          {/* Recording Badge */}
+          {isRecording && (
+            <div className="flex items-center bg-red-950 border border-red-700 px-3 py-1 rounded-full animate-pulse gap-2">
+              <span className="h-2.5 w-2.5 rounded-full bg-red-500"></span>
+              <span className="text-xs text-red-400 font-semibold tracking-wider uppercase">REC {formatDuration(recordingDuration)}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Global Alarm Banner */}
+        {alarmActive && (
+          <div className="bg-red-600 text-black px-4 py-2 rounded font-bold animate-pulse text-sm shadow-md flex items-center gap-2">
+            <AlertTriangleIcon className="w-5 h-5" />
+            CRITICAL ALARM: {alarmType} DETECTED
+          </div>
+        )}
+
+        {/* Clock & Date */}
+        <div className="text-right flex items-center gap-4">
+          <div>
+            <div className="text-[10px] text-slate-500 text-right uppercase tracking-widest">SYSTEM DATE</div>
+            <div className="text-slate-300 text-sm">{formatDate(currentTime)}</div>
+          </div>
+          <div className="bg-slate-950 border border-slate-800 rounded px-3 py-1">
+            <span className="text-emerald-400 text-xl font-bold font-mono tracking-widest">
+              {currentTime.toLocaleTimeString()}
+            </span>
+          </div>
+        </div>
+      </header>
+
+      {/* --- MAIN DASHBOARD GRID --- */}
+      <main className="grid grid-cols-1 lg:grid-cols-3 gap-3 my-3 flex-grow">
+        
+        {/* LEFT COLUMN: ECG WAVEFORM + VITALS GRID (Takes 2/3 width on wide screens) */}
+        <section className="lg:col-span-2 flex flex-col gap-3">
+          
+          {/* ECG Waveform Card */}
+          <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 shadow-lg flex-grow flex flex-col min-h-[300px] relative">
+            <div className="flex justify-between items-center mb-1 border-b border-slate-800 pb-1">
+              <div className="flex items-center gap-2 text-emerald-400">
+                <ActivityIcon className="w-5 h-5 animate-pulse" />
+                <span className="font-bold text-xs uppercase tracking-wider">ECG Lead I (Real-time)</span>
+              </div>
+              <div className="flex gap-4 text-[10px] text-slate-400 uppercase">
+                <span>Gain: <b className="text-white">10 mm/mV</b></span>
+                <span>Speed: <b className="text-white">25 mm/s</b></span>
+                <span className="text-emerald-500 font-bold">HR SOURCE: ECG</span>
+              </div>
+            </div>
+            
+            {/* Visual Canvas Waveform with CSS Grid Paper Background */}
+            <div className="relative flex-grow rounded bg-[#060e06] border border-emerald-950/40 overflow-hidden min-h-[220px] ecg-grid">
+              <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
+              
+              {/* Massive floating Heart Rate indicator matching medical screens */}
+              <div className="absolute top-3 right-3 bg-slate-950/80 border border-slate-800/80 rounded p-2 text-right z-10 backdrop-blur-sm min-w-[100px]">
+                <div className="text-[9px] text-emerald-500 font-bold uppercase tracking-wider flex items-center justify-end gap-1">
+                  <HeartIcon className="w-3 h-3 animate-ping" />
+                  ECG HR
+                </div>
+                <div className={`text-4xl font-extrabold tracking-tighter ${hrAlert ? 'text-red-500 animate-pulse' : 'text-emerald-400'}`}>
+                  {heartRate}
+                </div>
+                <div className="text-[9px] text-slate-500">bpm</div>
+              </div>
+
+              {/* Lead I Label */}
+              <div className="absolute top-3 left-3 text-emerald-500 font-bold text-xs uppercase bg-slate-950/60 px-2 py-0.5 rounded border border-emerald-900/20">
+                Lead I
+              </div>
+            </div>
+          </div>
+
+          {/* Vitals Grid (2x2 structure + arrhythmia footer) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            
+            {/* SpO2 Card (Green) */}
+            <div className={`border rounded-lg p-3 relative flex flex-col justify-between shadow-lg h-[130px] transition-all duration-300 ${
+              spo2Alert 
+                ? 'bg-red-950/20 border-red-500 shadow-red-950/30' 
+                : 'bg-slate-900 border-slate-800'
+            }`}>
+              <div className="flex justify-between items-start">
+                <div className="text-emerald-400 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
+                  <ShieldIcon className="w-4 h-4 fill-emerald-500/20" />
+                  SpO₂
+                </div>
+                <span className="text-[9px] text-slate-500 uppercase">Range: 95-100%</span>
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className={`text-5xl font-extrabold tracking-tighter ${spo2Alert ? 'text-red-500 animate-pulse' : 'text-emerald-400'}`}>
+                  {spo2}
+                </span>
+                <span className="text-emerald-500 text-sm font-semibold">%</span>
+              </div>
+              <div className="flex justify-between items-center text-[10px] text-slate-400">
+                <span>Pleth Wave</span>
+                <span className={spo2Alert ? 'text-red-400 font-bold' : 'text-emerald-500 font-bold'}>
+                  {spo2Alert ? 'ALERT LOW' : 'NORMAL'}
+                </span>
+              </div>
+            </div>
+
+            {/* Temperature Card (Blue) */}
+            <div className={`border rounded-lg p-3 relative flex flex-col justify-between shadow-lg h-[130px] transition-all duration-300 ${
+              tempAlert 
+                ? 'bg-red-950/20 border-red-500 shadow-red-950/30' 
+                : 'bg-slate-900 border-slate-800'
+            }`}>
+              <div className="flex justify-between items-start">
+                <div className="text-cyan-400 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
+                  <ThermometerIcon className="w-4 h-4" />
+                  Temp (Core)
+                </div>
+                <span className="text-[9px] text-slate-500 uppercase">Range: 36-37.5°C</span>
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className={`text-5xl font-extrabold tracking-tighter ${tempAlert ? 'text-red-500 animate-pulse' : 'text-cyan-400'}`}>
+                  {temp.toFixed(1)}
+                </span>
+                <span className="text-cyan-500 text-sm font-semibold">°C</span>
+              </div>
+              <div className="flex justify-between items-center text-[10px] text-slate-400">
+                <span>Axillary</span>
+                <span className={tempAlert ? 'text-red-400 font-bold' : 'text-cyan-500 font-bold'}>
+                  {tempAlert ? (temp > 37.5 ? 'HYPERTHERMIA' : 'HYPOTHERMIA') : 'NORMAL'}
+                </span>
+              </div>
+            </div>
+
+            {/* EtCO2 Card (Orange) */}
+            <div className={`border rounded-lg p-3 relative flex flex-col justify-between shadow-lg h-[130px] transition-all duration-300 ${
+              etco2Alert 
+                ? 'bg-red-950/20 border-red-500 shadow-red-950/30' 
+                : 'bg-slate-900 border-slate-800'
+            }`}>
+              <div className="flex justify-between items-start">
+                <div className="text-orange-400 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
+                  <WindIcon className="w-4 h-4" />
+                  EtCO₂
+                </div>
+                <span className="text-[9px] text-slate-500 uppercase">Range: 35-45 mmHg</span>
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className={`text-5xl font-extrabold tracking-tighter ${etco2Alert ? 'text-red-500 animate-pulse' : 'text-orange-400'}`}>
+                  {etco2}
+                </span>
+                <span className="text-orange-500 text-sm font-semibold">mmHg</span>
+              </div>
+              <div className="flex justify-between items-center text-[10px] text-slate-400">
+                <span>Capnography</span>
+                <span className={etco2Alert ? 'text-red-400 font-bold' : 'text-orange-500 font-bold'}>
+                  {etco2Alert ? 'OUT OF RANGE' : 'NORMAL'}
+                </span>
+              </div>
+            </div>
+
+            {/* NIBP Card (Purple) */}
+            <div className={`border rounded-lg p-3 relative flex flex-col justify-between shadow-lg h-[130px] transition-all duration-300 ${
+              nibpAlert 
+                ? 'bg-red-950/20 border-red-500 shadow-red-950/30' 
+                : 'bg-slate-900 border-slate-800'
+            }`}>
+              <div className="flex justify-between items-start">
+                <div className="text-fuchsia-400 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
+                  <ActivityIcon className="w-4 h-4" />
+                  NIBP (Sys/Dia)
+                </div>
+                <span className="text-[9px] text-slate-500 uppercase">Range: 120/80 mmHg</span>
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className={`text-4xl font-extrabold tracking-tighter ${nibpAlert ? 'text-red-500 animate-pulse' : 'text-fuchsia-400'}`}>
+                  {nibpSys}/{nibpDia}
+                </span>
+                <span className="text-fuchsia-500 text-xs font-semibold">MAP: {Math.round(nibpDia + (nibpSys - nibpDia)/3)}</span>
+              </div>
+              <div className="flex justify-between items-center text-[10px] text-slate-400">
+                <span>Cuff (Auto: 15m)</span>
+                <span className={nibpAlert ? 'text-red-400 font-bold' : 'text-fuchsia-500 font-bold'}>
+                  {nibpAlert ? 'BP WARNING' : 'NORMAL'}
+                </span>
+              </div>
+            </div>
+
+            {/* Arrhythmia Status Card (Spans full grid width in this row) */}
+            <div className={`col-span-1 md:col-span-2 border rounded-lg p-3 relative flex justify-between items-center shadow-lg transition-all duration-300 ${
+              rhythmAlert 
+                ? 'bg-red-950/30 border-red-600 shadow-red-950/30' 
+                : 'bg-slate-900 border-slate-800'
+            }`}>
+              <div>
+                <div className="text-slate-500 text-[9px] uppercase tracking-wider font-semibold">Cardiac Rhythm Analysis</div>
+                <div className={`text-xl font-bold tracking-wide flex items-center gap-2 uppercase ${rhythmAlert ? 'text-red-500 animate-pulse' : 'text-emerald-400'}`}>
+                  <span className={`h-2.5 w-2.5 rounded-full ${rhythmAlert ? 'bg-red-500 animate-ping' : 'bg-emerald-400'}`}></span>
+                  {arrhythmia}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-slate-500 text-[9px] uppercase font-semibold">Lead Source</div>
+                <div className="text-slate-300 text-xs">Standard Lead I (ECG)</div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        {/* RIGHT COLUMN: TRENDS + QUICK ACTIONS (Takes 1/3 width on wide screens) */}
+        <section className="flex flex-col gap-3">
+          
+          {/* Trend Summary Panel */}
+          <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 shadow-lg flex-grow flex flex-col">
+            <h2 className="text-slate-300 font-bold text-xs uppercase tracking-wider mb-2 border-b border-slate-800 pb-1 flex items-center gap-1.5">
+              <FileTextIcon className="w-4 h-4 text-emerald-400" />
+              Trend Summary Panel
+            </h2>
+            
+            <div className="overflow-x-auto flex-grow">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-800 text-[10px] text-slate-500 uppercase tracking-widest">
+                    <th className="py-2 font-medium">Vital Sign</th>
+                    <th className="py-2 text-right font-medium">Value</th>
+                    <th className="py-2 text-center font-medium">Status</th>
+                    <th className="py-2 text-right font-medium">Sparkline</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/50">
+                  {/* HR row */}
+                  <tr>
+                    <td className="py-2 text-slate-300 font-semibold flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span> HR
+                    </td>
+                    <td className="py-2 text-right font-bold text-emerald-400">{heartRate} <span className="text-[9px] text-slate-500 font-normal">bpm</span></td>
+                    <td className="py-2 text-center">
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] ${hrAlert ? 'bg-red-950 text-red-400 border border-red-900/40' : 'bg-emerald-950 text-emerald-400 border border-emerald-900/30'}`}>
+                        {hrAlert ? 'ALERT' : 'OK'}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right">
+                      <svg className="w-16 h-5 inline-block text-emerald-500" viewBox="0 0 100 20">
+                        <path
+                          d={`M 0 10 L 10 12 L 20 8 L 30 14 L 40 10 L 50 15 L 60 7 L 70 11 L 80 ${heartRate > 100 ? 2 : 10} L 90 10 L 100 ${heartRate > 100 ? 1 : 9}`}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </td>
+                  </tr>
+                  {/* SpO2 row */}
+                  <tr>
+                    <td className="py-2 text-slate-300 font-semibold flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"></span> SpO₂
+                    </td>
+                    <td className="py-2 text-right font-bold text-emerald-400">{spo2} <span className="text-[9px] text-slate-500 font-normal">%</span></td>
+                    <td className="py-2 text-center">
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] ${spo2Alert ? 'bg-red-950 text-red-400 border border-red-900/40' : 'bg-emerald-950 text-emerald-400 border border-emerald-900/30'}`}>
+                        {spo2Alert ? 'ALERT' : 'OK'}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right">
+                      <svg className="w-16 h-5 inline-block text-emerald-400" viewBox="0 0 100 20">
+                        <path
+                          d={`M 0 10 L 10 9 L 20 9 L 30 10 L 40 9 L 50 10 L 60 9 L 70 ${spo2 < 95 ? 18 : 9} L 80 ${spo2 < 95 ? 19 : 10} L 90 10 L 100 ${spo2 < 95 ? 17 : 9}`}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </td>
+                  </tr>
+                  {/* Temp row */}
+                  <tr>
+                    <td className="py-2 text-slate-300 font-semibold flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-cyan-500"></span> Temp
+                    </td>
+                    <td className="py-2 text-right font-bold text-cyan-400">{temp.toFixed(1)} <span className="text-[9px] text-slate-500 font-normal">°C</span></td>
+                    <td className="py-2 text-center">
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] ${tempAlert ? 'bg-red-950 text-red-400 border border-red-900/40' : 'bg-emerald-950 text-emerald-400 border border-emerald-900/30'}`}>
+                        {tempAlert ? 'ALERT' : 'OK'}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right">
+                      <svg className="w-16 h-5 inline-block text-cyan-400" viewBox="0 0 100 20">
+                        <path
+                          d={`M 0 10 L 10 11 L 20 10 L 30 11 L 40 10 L 50 ${temp > 38 ? 2 : 11} L 60 ${temp > 38 ? 1 : 10} L 70 10 L 80 11 L 90 10 L 100 9`}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </td>
+                  </tr>
+                  {/* EtCO2 row */}
+                  <tr>
+                    <td className="py-2 text-slate-300 font-semibold flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-orange-500"></span> EtCO₂
+                    </td>
+                    <td className="py-2 text-right font-bold text-orange-400">{etco2} <span className="text-[9px] text-slate-500 font-normal">mmHg</span></td>
+                    <td className="py-2 text-center">
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] ${etco2Alert ? 'bg-red-950 text-red-400 border border-red-900/40' : 'bg-emerald-950 text-emerald-400 border border-emerald-900/30'}`}>
+                        {etco2Alert ? 'ALERT' : 'OK'}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right">
+                      <svg className="w-16 h-5 inline-block text-orange-400" viewBox="0 0 100 20">
+                        <path
+                          d="M 0 10 L 10 11 L 20 8 L 30 10 L 40 12 L 50 9 L 60 11 L 70 12 L 80 9 L 90 10 L 100 11"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </td>
+                  </tr>
+                  {/* NIBP row */}
+                  <tr>
+                    <td className="py-2 text-slate-300 font-semibold flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-fuchsia-500"></span> NIBP
+                    </td>
+                    <td className="py-2 text-right font-bold text-fuchsia-400">{nibpSys}/{nibpDia}</td>
+                    <td className="py-2 text-center">
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] ${nibpAlert ? 'bg-red-950 text-red-400 border border-red-900/40' : 'bg-emerald-950 text-emerald-400 border border-emerald-900/30'}`}>
+                        {nibpAlert ? 'ALERT' : 'OK'}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right">
+                      <svg className="w-16 h-5 inline-block text-fuchsia-400" viewBox="0 0 100 20">
+                        <path
+                          d={`M 0 10 L 15 11 L 30 9 L 45 10 L 60 ${nibpSys < 100 ? 16 : 10} L 75 10 L 90 9 L 100 11`}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-3 bg-slate-950/60 p-2.5 rounded border border-slate-800/60 text-[10px] text-slate-400 flex flex-col gap-1.5">
+              <span className="font-semibold text-slate-300 uppercase tracking-widest text-[9px]">Clinical Assessment</span>
+              {alarmActive ? (
+                <div className="text-red-400 font-bold animate-pulse text-[10px]">
+                  ⚠ EMERGENCY: {alarmType === 'V-TACH' && 'V-Tach detected. Preparing crash cart and defibrillation protocol.'}
+                  {alarmType === 'HYPOXIA' && 'SpO2 falling rapidly. Verify airway patency, check oxygen delivery, start manual ventilation if needed.'}
+                  {alarmType === 'FEVER' && 'High febrile response. Suspect systemic infection. Administer antipyretics and draw blood cultures.'}
+                </div>
+              ) : (
+                <div className="text-emerald-500 font-medium">
+                  ✓ Patient is stable. Hemodynamics within normal ranges. Continuing bedside Lead I cardiorespiratory monitoring.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Actions Panel */}
+          <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 shadow-lg">
+            <h2 className="text-slate-300 font-bold text-xs uppercase tracking-wider mb-3 border-b border-slate-800 pb-1 flex items-center gap-1.5">
+              <ActivityIcon className="w-4 h-4 text-emerald-400" />
+              Quick Actions Panel
+            </h2>
+            
+            <div className="grid grid-cols-2 gap-2">
+              
+              {/* Record Action */}
+              <button
+                onClick={handleToggleRecording}
+                className={`py-2 px-3 rounded flex items-center justify-center gap-2 border font-semibold text-xs tracking-wider transition-all cursor-pointer ${
+                  isRecording
+                    ? 'bg-red-950 border-red-500 text-red-300 hover:bg-red-900/60'
+                    : 'bg-slate-950 border-slate-800 hover:border-slate-600 text-slate-300 hover:text-white'
+                }`}
+              >
+                {isRecording ? <PauseIcon className="w-3.5 h-3.5 text-red-500" /> : <PlayIcon className="w-3.5 h-3.5" />}
+                {isRecording ? 'STOP REC' : 'START REC'}
+              </button>
+
+              {/* Generate Report */}
+              <button
+                onClick={() => { initAudio(); setShowReport(true); }}
+                className="py-2 px-3 rounded flex items-center justify-center gap-2 bg-slate-950 border border-slate-800 hover:border-slate-600 text-slate-300 hover:text-white font-semibold text-xs tracking-wider transition-all cursor-pointer"
+              >
+                <FileTextIcon className="w-3.5 h-3.5 text-blue-400" />
+                REPORT
+              </button>
+
+              {/* Export Logs */}
+              <button
+                onClick={handleExportCSV}
+                className="py-2 px-3 rounded flex items-center justify-center gap-2 bg-slate-950 border border-slate-800 hover:border-slate-600 text-slate-300 hover:text-white font-semibold text-xs tracking-wider transition-all cursor-pointer"
+              >
+                <DownloadIcon className="w-3.5 h-3.5 text-cyan-400" />
+                EXPORT DATA
+              </button>
+
+              {/* Alarm Audio Mute / Unmute */}
+              <button
+                onClick={() => setAudioEnabled(!audioEnabled)}
+                className={`py-2 px-3 rounded flex items-center justify-center gap-2 border font-semibold text-xs tracking-wider transition-all cursor-pointer ${
+                  !audioEnabled
+                    ? 'bg-red-950/20 border-red-900 text-red-400'
+                    : 'bg-slate-950 border-slate-800 hover:border-slate-600 text-slate-300 hover:text-white'
+                }`}
+              >
+                {audioEnabled ? <Volume2Icon className="w-3.5 h-3.5 text-emerald-400" /> : <VolumeXIcon className="w-3.5 h-3.5 text-red-500 animate-pulse" />}
+                {audioEnabled ? 'MUTING: OFF' : 'MUTING: ON'}
+              </button>
+
+              {/* Simulate Alarm */}
+              <button
+                onClick={handleSimulateAlarm}
+                disabled={alarmActive}
+                className={`py-2.5 col-span-2 rounded flex items-center justify-center gap-2 border font-bold text-xs tracking-wider transition-all uppercase cursor-pointer ${
+                  alarmActive
+                    ? 'bg-slate-950 border-slate-800 text-slate-600 cursor-not-allowed'
+                    : 'bg-red-700 hover:bg-red-600 text-white border-red-600 shadow-lg shadow-red-900/30'
+                }`}
+              >
+                <AlertTriangleIcon className="w-4 h-4" />
+                Simulate Alarm
+              </button>
+
+              {/* Clear Alarm */}
+              <button
+                onClick={handleClearAlarm}
+                disabled={!alarmActive}
+                className={`py-2 col-span-2 rounded flex items-center justify-center gap-2 border font-semibold text-xs tracking-wider transition-all uppercase cursor-pointer ${
+                  !alarmActive
+                    ? 'bg-slate-950 border-slate-900 text-slate-700 cursor-not-allowed'
+                    : 'bg-emerald-700 hover:bg-emerald-600 text-white border-emerald-600 shadow-lg shadow-emerald-950/30'
+                }`}
+              >
+                <BellIcon className="w-4 h-4" />
+                Clear Alarm
+              </button>
+
+            </div>
+          </div>
+
+        </section>
+      </main>
+
+      {/* --- CLINICAL REPORT MODAL --- */}
+      {showReport && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-slate-900 border-2 border-slate-800 rounded-xl max-w-2xl w-full p-6 shadow-2xl relative">
+            <button 
+              onClick={() => setShowReport(false)}
+              className="absolute top-4 right-4 text-slate-500 hover:text-white text-xl font-bold cursor-pointer"
+            >
+              ×
+            </button>
+            
+            <div className="flex justify-between items-start border-b border-slate-800 pb-3 mb-4">
+              <div>
+                <h3 className="text-emerald-400 font-bold text-lg">PATIENT CLINICAL SUMMARY</h3>
+                <p className="text-xs text-slate-400">Generated on: {formatDate(currentTime)} at {currentTime.toLocaleTimeString()}</p>
+              </div>
+              <div className="bg-slate-950 border border-slate-800 px-3 py-1 rounded text-xs">
+                Status: <span className={alarmActive ? 'text-red-400 font-bold animate-pulse' : 'text-emerald-500 font-bold'}>{alarmActive ? 'ALERTING' : 'STABLE'}</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 text-xs mb-4">
+              <div className="space-y-2">
+                <div className="bg-slate-950 p-2.5 rounded border border-slate-800/80">
+                  <span className="text-slate-500 font-semibold block uppercase text-[9px] mb-0.5">Demographics</span>
+                  <p className="text-slate-200"><b className="text-white">ID:</b> PT-004821</p>
+                  <p className="text-slate-200"><b className="text-white">Name:</b> Adebayo, K.</p>
+                  <p className="text-slate-200"><b className="text-white">Sex/Age:</b> Male, 34 yrs</p>
+                  <p className="text-slate-200"><b className="text-white">Loc:</b> Bed ICU-07</p>
+                </div>
+                <div className="bg-slate-950 p-2.5 rounded border border-slate-800/80">
+                  <span className="text-slate-500 font-semibold block uppercase text-[9px] mb-0.5">Current Vital Status</span>
+                  <p className="text-slate-200"><b className="text-white">Heart Rate:</b> {heartRate} bpm</p>
+                  <p className="text-slate-200"><b className="text-white">SpO₂ Level:</b> {spo2}%</p>
+                  <p className="text-slate-200"><b className="text-white">Temperature:</b> {temp}°C</p>
+                  <p className="text-slate-200"><b className="text-white">EtCO₂:</b> {etco2} mmHg</p>
+                  <p className="text-slate-200"><b className="text-white">Blood Press:</b> {nibpSys}/{nibpDia} mmHg</p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="bg-slate-950 p-2.5 rounded border border-slate-800/80 h-full flex flex-col justify-between">
+                  <div>
+                    <span className="text-slate-500 font-semibold block uppercase text-[9px] mb-0.5">Clinical Evaluation Notes</span>
+                    {alarmActive ? (
+                      <p className="text-red-400 leading-relaxed font-semibold">
+                        ⚠ Patient is currently presenting with a critical event. Arrhythmia code: {arrhythmia}. Hemodynamic monitoring indicates {alarmType === 'V-TACH' ? 'Ventricular Tachycardia (V-Tach) causing drop in cardiac output and arterial blood pressure.' : alarmType === 'HYPOXIA' ? 'Hypoxemia. Oxygen saturation levels dropped below threshold. Tachycardic compensation present.' : 'Systemic febrile reaction. Patient core body temperature spiked.'} Please check patient immediately.
+                      </p>
+                    ) : (
+                      <p className="text-slate-300 leading-relaxed">
+                        Continuous Lead I ECG shows normal P-Q-R-S-T morphology representing synchronized sinus depolarization. Oxygen saturation (SpO2) and end-tidal CO2 levels are stable, reflecting normal respiratory efficiency. Temperature and arterial blood pressures are well controlled. No acute arrhythmias detected.
+                      </p>
+                    )}
+                  </div>
+                  <div className="border-t border-slate-800 pt-2 mt-2 text-[10px] text-slate-500 text-right">
+                    Attending Physician Review Required
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-slate-800 pt-3">
+              <button 
+                onClick={handleExportCSV}
+                className="py-1.5 px-3 rounded bg-slate-950 border border-slate-800 hover:border-slate-600 text-xs text-slate-300 font-semibold cursor-pointer"
+              >
+                Export CSV Log
+              </button>
+              <button 
+                onClick={() => setShowReport(false)}
+                className="py-1.5 px-4 rounded bg-emerald-600 hover:bg-emerald-500 text-xs text-black font-bold cursor-pointer"
+              >
+                Close Report
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- DASHBOARD STATUS BAR --- */}
+      <footer className="bg-slate-900 border border-slate-800 rounded-lg px-4 py-2 flex justify-between items-center text-xs text-slate-400 shadow-md">
+        <div className="flex items-center gap-4">
+          <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
+            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping"></span>
+            Monitoring active
+          </span>
+          <span className="text-slate-600">|</span>
+          <span>Bed-side unit: <b className="text-slate-300">ICU-07-BED-A</b></span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span>Network status:</span>
+          <span className="bg-emerald-950 text-emerald-400 border border-emerald-900/40 px-2 py-0.5 rounded-full text-[10px] font-bold">
+            Connected
+          </span>
+        </div>
+      </footer>
+
+    </div>
+  );
+}
