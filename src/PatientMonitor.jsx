@@ -562,15 +562,15 @@ export default function PatientMonitor() {
           {/* Patient Details */}
           <div>
             <div className="text-[10px] text-slate-500 uppercase tracking-widest">PATIENT ID</div>
-            <div className="text-emerald-400 font-bold text-lg">PT-004821</div>
+            <div className="text-emerald-400 font-bold text-lg">PT-000001</div>
           </div>
           <div>
             <div className="text-[10px] text-slate-500 uppercase tracking-widest">PATIENT NAME</div>
-            <div className="text-white font-bold text-lg">Adebayo, K.</div>
+            <div className="text-white font-bold text-lg">Adeola, E.</div>
           </div>
           <div>
             <div className="text-[10px] text-slate-500 uppercase tracking-widest">AGE / GENDER</div>
-            <div className="text-slate-200 text-lg">34 yrs / Male</div>
+            <div className="text-slate-200 text-lg">23 yrs / Male</div>
           </div>
           <div>
             <div className="text-[10px] text-slate-500 uppercase tracking-widest">ROOM</div>

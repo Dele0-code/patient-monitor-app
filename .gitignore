@@ -1,0 +1,12 @@
+# Ignore a specific file
+secret_keys.txt
+
+# Ignore a whole directory (and everything in it)
+node_modules/
+build/
+
+# Ignore all files ending in a specific extension (e.g., log files)
+*.log
+
+# Exception: Don't ignore this specific file, even though we ignored .log files above
+!important.log
