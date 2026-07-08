@@ -1,0 +1,532 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h> // Highly recommended for building the payload cleanly
+// // --- Pinout ---
+// const int LO_PLUS  = 32;
+// const int LO_MINUS = 33;
+// const int ECG_PIN  = 34;
+
+// // --- Sampling & Timing ---
+// const float fs = 50.0;
+// const unsigned long samplingPeriod = 1000000UL / fs;
+// unsigned long lastSampleTime = 0;
+// const float dt = 1.0 / fs;
+
+// // --- Band-Pass Filter Parameters ---
+// const float low_cutoff  = 40.0;
+// const float high_cutoff = 0.5;
+// float alphaLPF, alphaHPF;
+// float yLPF_prev = 0, yHPF_prev = 0;
+// float xHPF_prev = 0;
+
+// // --- Notch Filter (50Hz Mains Hum) Parameters ---
+// const float f0 = 50.0;
+// const float Q  = 30.0;
+// float notch_b0, notch_b1, notch_b2;
+// float notch_a1, notch_a2;
+// float notch_x1 = 0, notch_x2 = 0, notch_y1 = 0, notch_y2 = 0;
+
+
+// // --- High-Pass Filter Function ---
+// float highPassFilter(float x) {
+//   float y = alphaHPF * (yHPF_prev + x - xHPF_prev);
+//   yHPF_prev = y;
+//   xHPF_prev = x;
+//   return y;
+// }
+
+// // --- Low-Pass Filter Function ---
+// float lowPassFilter(float x) {
+//   yLPF_prev = alphaLPF * yLPF_prev + (1 - alphaLPF) * x;
+//   return yLPF_prev;
+// }
+
+// // --- Notch Filter Function (Removes electrical interference) ---
+// float notchFilter(float x) {
+//   float y = notch_b0 * x + notch_b1 * notch_x1 + notch_b2 * notch_x2
+//                        - notch_a1 * notch_y1 - notch_a2 * notch_y2;
+//   notch_x2 = notch_x1; notch_x1 = x;
+//   notch_y2 = notch_y1; notch_y1 = y;
+//   return y;
+// }
+
+// void setup() {
+//   // Must match the baud rate in the bottom corner of your Serial Plotter!
+//   Serial.begin(115200);
+//   delay(500);
+
+//   // Set up pins
+//   pinMode(LO_PLUS, INPUT);
+//   pinMode(LO_MINUS, INPUT);
+//   analogReadResolution(12);
+
+//   // Initialize filter coefficients
+//   alphaLPF = exp(-2 * PI * low_cutoff * dt);
+//   alphaHPF = exp(-2 * PI * high_cutoff * dt);
+
+//   float w0 = 2 * PI * f0 / fs;
+//   float alpha = sin(w0) / (2 * Q);
+//   float cosw0 = cos(w0);
+//   float a0_inv = 1.0 / (1.0 + alpha);
+
+//   notch_b0 = 1 * a0_inv;
+//   notch_b1 = (-2 * cosw0) * a0_inv;
+//   notch_b2 = 1 * a0_inv;
+//   notch_a1 = (-2 * cosw0) * a0_inv;
+//   notch_a2 = (1 - alpha) * a0_inv;
+
+//   // Set initial filter states
+//   float initialValue = (float)analogRead(ECG_PIN);
+//   yHPF_prev = 0;
+//   xHPF_prev = initialValue;
+//   yLPF_prev = initialValue;
+// }
+
+// void loop() {
+//   unsigned long nowUs = micros();
+  
+//   // Only take a reading based on our sampling frequency (50Hz)
+//   if (nowUs - lastSampleTime >= samplingPeriod) {
+//     lastSampleTime = nowUs;
+
+//     // 1. Leads-Off Detection
+//     if((digitalRead(LO_PLUS) == 1) || (digitalRead(LO_MINUS) == 1)){
+//       // If the sensor pads fall off, plot a flatline at 0
+//       Serial.println(0);
+//     } else {
+//       // 2. Read the raw analog signal
+//       float x = (float)analogRead(ECG_PIN);
+      
+//       // 3. Apply the filters to clean up the waveform
+//       float y1 = highPassFilter(x);
+//       float y2 = lowPassFilter(y1);
+//       float y3 = notchFilter(y2);
+
+//       // Center the waveform around 0 (ESP32 12-bit ADC goes 0-4095, so center is ~2048)
+//       // int sampleInt = (int)round(y3 - 2048.0f);
+//       int sampleInt = (int)round(y3);
+      
+//       // 4. Send the clean number to the Serial Plotter
+//       Serial.println(sampleInt); 
+//     }
+//   }
+// }
+
+
+
+
+
+
+
+// #include <Arduino.h>
+// #include <Wire.h>
+// #include "MAX30105.h"        // SparkFun library
+// #include "spo2_algorithm.h"  // The built-in SparkFun algorithm for SpO2 and BPM
+
+// MAX30105 particleSensor;
+
+// // --- Pinout ---
+// const int LO_PLUS  = 32;
+// const int LO_MINUS = 33;
+// const int ECG_PIN  = 34;
+
+// // --- Sampling & Timing (UPGRADED TO 100 Hz) ---
+// const float fs = 100.0; 
+// const unsigned long samplingPeriod = 1000000UL / fs;
+// unsigned long lastSampleTime = 0;
+// const float dt = 1.0 / fs;
+
+// // --- Band-Pass Filter Parameters (ECG) ---
+// const float low_cutoff  = 40.0;
+// const float high_cutoff = 0.5;
+// float alphaLPF, alphaHPF;
+// float yLPF_prev = 0, yHPF_prev = 0;
+// float xHPF_prev = 0;
+
+// // --- Notch Filter Parameters (ECG) ---
+// const float f0 = 50.0;
+// const float Q  = 30.0;
+// float notch_b0, notch_b1, notch_b2;
+// float notch_a1, notch_a2;
+// float notch_x1 = 0, notch_x2 = 0, notch_y1 = 0, notch_y2 = 0;
+
+// // --- MAX30102 Buffer & Variables ---
+// uint32_t irBuffer[100];  // Infrared LED sensor data
+// uint32_t redBuffer[100]; // Red LED sensor data
+// int32_t bufferLength = 100; // Number of samples needed to calculate
+// int bufferIndex = 0;
+
+// int32_t spo2;           // Calculated SpO2 value
+// int8_t validSPO2;       // 1 if SpO2 calculation is valid, 0 if not
+// int32_t heartRate;      // Calculated Heart Rate
+// int8_t validHeartRate;  // 1 if HR calculation is valid, 0 if not
+
+// // --- Filter Functions ---
+// float highPassFilter(float x) {
+//   float y = alphaHPF * (yHPF_prev + x - xHPF_prev);
+//   yHPF_prev = y;
+//   xHPF_prev = x;
+//   return y;
+// }
+
+// float lowPassFilter(float x) {
+//   yLPF_prev = alphaLPF * yLPF_prev + (1 - alphaLPF) * x;
+//   return yLPF_prev;
+// }
+
+// float notchFilter(float x) {
+//   float y = notch_b0 * x + notch_b1 * notch_x1 + notch_b2 * notch_x2
+//                        - notch_a1 * notch_y1 - notch_a2 * notch_y2;
+//   notch_x2 = notch_x1; notch_x1 = x;
+//   notch_y2 = notch_y1; notch_y1 = y;
+//   return y;
+// }
+
+// void setup() {
+//   Serial.begin(115200);
+//   delay(500);
+
+//   // --- Setup ECG ---
+//   pinMode(LO_PLUS, INPUT);
+//   pinMode(LO_MINUS, INPUT);
+//   analogReadResolution(12);
+
+//   // Calculate filter math based on new 100Hz speed
+//   alphaLPF = exp(-2 * PI * low_cutoff * dt);
+//   alphaHPF = exp(-2 * PI * high_cutoff * dt);
+
+//   float w0 = 2 * PI * f0 / fs;
+//   float alpha = sin(w0) / (2 * Q);
+//   float cosw0 = cos(w0);
+//   float a0_inv = 1.0 / (1.0 + alpha);
+
+//   notch_b0 = 1 * a0_inv;
+//   notch_b1 = (-2 * cosw0) * a0_inv;
+//   notch_b2 = 1 * a0_inv;
+//   notch_a1 = (-2 * cosw0) * a0_inv;
+//   notch_a2 = (1 - alpha) * a0_inv;
+
+//   float initialValue = (float)analogRead(ECG_PIN);
+//   yHPF_prev = 0;
+//   xHPF_prev = initialValue;
+//   yLPF_prev = initialValue;
+
+//   // --- Setup MAX30102 ---
+//   Wire.begin(21, 22); // SDA = 21, SCL = 22
+//   if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
+//     Serial.println("MAX30102 was not found. Check wiring to pins 21/22.");
+//     while (1); 
+//   }
+
+//   // Configure sensor: Brightness=60, Averaging=4, Mode=2(Red+IR), Rate=100Hz, Width=411, ADC=4096
+//   particleSensor.setup(60, 4, 2, 100, 411, 4096); 
+//   Serial.println("System Ready! Place finger firmly on the sensor and sit still.");
+// }
+
+// void loop() {
+//   unsigned long nowUs = micros();
+  
+//   // Trigger exactly at 100Hz (every 10,000 microseconds)
+//   if (nowUs - lastSampleTime >= samplingPeriod) {
+//     lastSampleTime = nowUs;
+
+//     // --- 1. Read ECG ---
+//     int ecgOutput = 2048; // Default flatline
+//     if((digitalRead(LO_PLUS) == 0) && (digitalRead(LO_MINUS) == 0)){
+//       float x = (float)analogRead(ECG_PIN);
+//       float y1 = highPassFilter(x);
+//       float y2 = lowPassFilter(y1);
+//       float y3 = notchFilter(y2);
+//       ecgOutput = (int)round(y3 + 2048.0f); // Positive range centering
+//     }
+
+//     // --- 2. Read MAX30102 ---
+//     particleSensor.check(); // Check sensor buffer
+//     while (particleSensor.available()) {
+//       redBuffer[bufferIndex] = particleSensor.getFIFORed();
+//       irBuffer[bufferIndex] = particleSensor.getFIFOIR();
+//       particleSensor.nextSample(); // Move to next sample
+      
+//       bufferIndex++;
+//       if (bufferIndex >= 100) break; // Buffer full
+//     }
+
+//     // --- 3. Calculate SpO2 & Print ---
+//     // Once we collect 100 samples (which takes 1 second), calculate!
+//     if (bufferIndex >= 100) {
+//       // Run the massive SparkFun algorithm
+//       maxim_heart_rate_and_oxygen_saturation(irBuffer, bufferLength, redBuffer, &spo2, &validSPO2, &heartRate, &validHeartRate);
+
+//       // Print the unified results
+//       Serial.print("ECG Signal: ");
+//       Serial.print(ecgOutput);
+
+//       if (validHeartRate && heartRate > 30 && heartRate < 200) {
+//         Serial.print("\t | BPM: ");
+//         Serial.print(heartRate, DEC);
+//       } else {
+//         Serial.print("\t | BPM: -- ");
+//       }
+
+//       if (validSPO2 && spo2 > 50 && spo2 <= 100) {
+//         Serial.print("\t | SpO2: ");
+//         Serial.print(spo2, DEC);
+//         Serial.println("%");
+//       } else {
+//         Serial.println("\t | SpO2: -- %");
+//       }
+
+//       // To keep data flowing constantly, we dump the oldest 25 samples 
+//       // and keep the newest 75. This updates the reading every 0.25 seconds.
+//       for (byte i = 25; i < 100; i++) {
+//         redBuffer[i - 25] = redBuffer[i];
+//         irBuffer[i - 25] = irBuffer[i];
+//       }
+//       bufferIndex = 75; 
+//     }
+//   }
+// }  
+
+
+
+
+#include <Arduino.h>
+#include <Wire.h>
+#include <SPI.h>
+#include "MAX30105.h"        
+#include "spo2_algorithm.h"  
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// --- OLED SPI Settings ---
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_MOSI  23
+#define OLED_CLK   18
+#define OLED_DC    19
+#define OLED_CS    5
+#define OLED_RESET 15
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
+
+// --- DS18B20 Temp Settings ---
+#define ONE_WIRE_BUS 4
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire);
+float bodyTempC = 0.0;
+unsigned long lastTempRequest = 0;
+
+// --- MAX30102 Settings ---
+MAX30105 particleSensor;
+uint32_t irBuffer[100];  
+uint32_t redBuffer[100]; 
+int32_t bufferLength = 100; 
+int bufferIndex = 0;
+
+int32_t spo2;           
+int8_t validSPO2;       
+int32_t heartRate;      
+int8_t validHeartRate;  
+
+// --- ECG Pinout & Filtering ---
+const int LO_PLUS  = 32;
+const int LO_MINUS = 33;
+const int ECG_PIN  = 34;
+
+const float fs = 100.0; 
+const unsigned long samplingPeriod = 1000000UL / fs;
+unsigned long lastSampleTime = 0;
+const float dt = 1.0 / fs;
+
+const float low_cutoff  = 40.0;
+const float high_cutoff = 0.5;
+float alphaLPF, alphaHPF;
+float yLPF_prev = 0, yHPF_prev = 0, xHPF_prev = 0;
+
+const float f0 = 50.0;
+const float Q  = 30.0;
+float notch_b0, notch_b1, notch_b2, notch_a1, notch_a2;
+float notch_x1 = 0, notch_x2 = 0, notch_y1 = 0, notch_y2 = 0;
+
+const int ECG_PEAK_THRESHOLD = 2600; 
+const unsigned long ECG_REFRACTORY_MS = 250; 
+unsigned long lastEcgPeakTime = 0;
+float ecgBpm = 0.0;
+float ecgBpmHistory[5]; 
+int ecgBpmIndex = 0;
+int ecgBeatCount = 0;
+
+// --- Filter Functions ---
+float highPassFilter(float x) {
+  float y = alphaHPF * (yHPF_prev + x - xHPF_prev);
+  yHPF_prev = y; xHPF_prev = x; return y;
+}
+
+float lowPassFilter(float x) {
+  yLPF_prev = alphaLPF * yLPF_prev + (1 - alphaLPF) * x;
+  return yLPF_prev;
+}
+
+float notchFilter(float x) {
+  float y = notch_b0 * x + notch_b1 * notch_x1 + notch_b2 * notch_x2
+                       - notch_a1 * notch_y1 - notch_a2 * notch_y2;
+  notch_x2 = notch_x1; notch_x1 = x; notch_y2 = notch_y1; notch_y1 = y; return y;
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+
+  // 1. Setup OLED
+  if(!display.begin(SSD1306_SWITCHCAPVCC)) {
+    Serial.println("SSD1306 allocation failed");
+    for(;;);
+  }
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0,20);
+  display.println("Booting System...");
+  display.display();
+
+  // 2. Setup DS18B20 (Non-blocking mode)
+  sensors.begin();
+  sensors.setWaitForConversion(false); // CRITICAL: Prevents temp sensor from freezing the ECG
+  sensors.requestTemperatures();
+  lastTempRequest = millis();
+
+  // 3. Setup ECG
+  pinMode(LO_PLUS, INPUT);
+  pinMode(LO_MINUS, INPUT);
+  analogReadResolution(12);
+
+  alphaLPF = exp(-2 * PI * low_cutoff * dt);
+  alphaHPF = exp(-2 * PI * high_cutoff * dt);
+  float w0 = 2 * PI * f0 / fs;
+  float alpha = sin(w0) / (2 * Q);
+  float cosw0 = cos(w0);
+  float a0_inv = 1.0 / (1.0 + alpha);
+
+  notch_b0 = 1 * a0_inv; notch_b1 = (-2 * cosw0) * a0_inv; notch_b2 = 1 * a0_inv;
+  notch_a1 = (-2 * cosw0) * a0_inv; notch_a2 = (1 - alpha) * a0_inv;
+
+  float initialValue = (float)analogRead(ECG_PIN);
+  yHPF_prev = 0; xHPF_prev = initialValue; yLPF_prev = initialValue;
+
+  // 4. Setup MAX30102
+  Wire.begin(21, 22); 
+  if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
+    display.clearDisplay();
+    display.setCursor(0,20);
+    display.println("MAX30102 Error");
+    display.display();
+    while (1); 
+  }
+  particleSensor.setup(60, 4, 2, 100, 411, 4096); 
+  
+  display.clearDisplay();
+}
+
+void loop() {
+  unsigned long nowUs = micros();
+  unsigned long nowMs = millis();
+  
+  // Update Temperature every 1 second in the background
+  if (nowMs - lastTempRequest >= 1000) {
+    bodyTempC = sensors.getTempCByIndex(0);
+    sensors.requestTemperatures(); // Start next reading
+    lastTempRequest = nowMs;
+  }
+
+  // 100 Hz Main Loop
+  if (nowUs - lastSampleTime >= samplingPeriod) {
+    lastSampleTime = nowUs;
+
+    // --- 1. Read ECG ---
+    int ecgOutput = 2048; 
+    
+    if((digitalRead(LO_PLUS) == 0) && (digitalRead(LO_MINUS) == 0)){
+      float x = (float)analogRead(ECG_PIN);
+      float y1 = highPassFilter(x);
+      float y2 = lowPassFilter(y1);
+      float y3 = notchFilter(y2);
+      ecgOutput = (int)round(y3 + 2048.0f); 
+
+      if (ecgOutput > ECG_PEAK_THRESHOLD && (nowMs - lastEcgPeakTime > ECG_REFRACTORY_MS)) {
+        unsigned long beatInterval = nowMs - lastEcgPeakTime;
+        lastEcgPeakTime = nowMs;
+        if (beatInterval > 300 && beatInterval < 2000) { 
+          float currentBpm = 60000.0 / beatInterval; 
+          ecgBpmHistory[ecgBpmIndex] = currentBpm;
+          ecgBpmIndex = (ecgBpmIndex + 1) % 5;
+          if (ecgBeatCount < 5) ecgBeatCount++;
+          
+          float sum = 0;
+          for(int i = 0; i < ecgBeatCount; i++) sum += ecgBpmHistory[i];
+          ecgBpm = sum / ecgBeatCount;
+        }
+      }
+    }
+
+    // --- 2. Read MAX30102 ---
+    particleSensor.check(); 
+    while (particleSensor.available()) {
+      redBuffer[bufferIndex] = particleSensor.getFIFORed();
+      irBuffer[bufferIndex] = particleSensor.getFIFOIR();
+      particleSensor.nextSample(); 
+      bufferIndex++;
+      if (bufferIndex >= 100) break; 
+    }
+
+    // --- 3. Send ONLY ECG to Serial Plotter ---
+    Serial.println(ecgOutput);
+
+    // --- 4. Calculate SpO2 & Update OLED (Runs 4 times a second) ---
+    if (bufferIndex >= 100) {
+      maxim_heart_rate_and_oxygen_saturation(irBuffer, bufferLength, redBuffer, &spo2, &validSPO2, &heartRate, &validHeartRate);
+
+      // Clean up invalid readings
+      if(!validHeartRate || heartRate > 200 || heartRate < 30) heartRate = 0;
+      if(!validSPO2 || spo2 > 100 || spo2 < 50) spo2 = 0;
+
+      // Update OLED Display
+      display.clearDisplay();
+      display.setTextSize(2);
+      
+      // Row 1: ECG BPM
+      display.setCursor(0, 0);
+      display.print("ECG: ");
+      if (ecgBpm > 0) display.print((int)ecgBpm); 
+      else display.print("--");
+
+      // Row 2: MAX BPM
+      display.setCursor(0, 16);
+      display.print("MAX: ");
+      if (heartRate > 0) display.print(heartRate); 
+      else display.print("--");
+
+      // Row 3: SpO2
+      display.setCursor(0, 32);
+      display.print("O2 : ");
+      if (spo2 > 0) { display.print(spo2); display.print("%"); }
+      else display.print("--%");
+
+      // Row 4: Temperature
+      display.setCursor(0, 48);
+      display.print("TMP: ");
+      if (bodyTempC > -10.0) { display.print(bodyTempC, 1); display.print("C"); }
+      else display.print("--C");
+
+      display.display();
+
+      // Shift MAX buffer
+      for (byte i = 25; i < 100; i++) {
+        redBuffer[i - 25] = redBuffer[i];
+        irBuffer[i - 25] = irBuffer[i];
+      }
+      bufferIndex = 75; 
+    }
+  }
+}
