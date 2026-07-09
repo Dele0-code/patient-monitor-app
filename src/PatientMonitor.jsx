@@ -113,7 +113,6 @@ export default function PatientMonitor() {
   const [heartRate, setHeartRate] = useState(72);
   const [spo2, setSpo2] = useState(98);
   const [temp, setTemp] = useState(36.8);
-  const [etco2, setEtco2] = useState(38);
   const [nibpSys, setNibpSys] = useState(120);
   const [nibpDia, setNibpDia] = useState(80);
   const [arrhythmia, setArrhythmia] = useState('Normal Sinus');
@@ -197,7 +196,6 @@ export default function PatientMonitor() {
         if (alarmType === 'V-TACH') {
           setHeartRate(prev => Math.min(175, Math.max(155, Math.round(prev + getVariation(-3, 3)))));
           setSpo2(prev => Math.max(91, Math.min(94, Math.round(prev + getVariation(-0.5, 0.5)))));
-          setEtco2(prev => Math.max(30, Math.min(34, Math.round(prev + getVariation(-1, 1)))));
           setTemp(prev => Math.max(36.4, Math.min(37.0, parseFloat((prev + getVariation(-0.05, 0.05)).toFixed(1)))));
           setNibpSys(prev => Math.max(85, Math.min(95, Math.round(prev + getVariation(-2, 2)))));
           setNibpDia(prev => Math.max(50, Math.min(58, Math.round(prev + getVariation(-1, 1)))));
@@ -205,7 +203,6 @@ export default function PatientMonitor() {
         } else if (alarmType === 'HYPOXIA') {
           setHeartRate(prev => Math.min(125, Math.max(105, Math.round(prev + getVariation(-2, 2)))));
           setSpo2(prev => Math.max(84, Math.min(88, Math.round(prev + getVariation(-1, 1)))));
-          setEtco2(prev => Math.max(45, Math.min(50, Math.round(prev + getVariation(-1, 1)))));
           setTemp(prev => Math.max(36.5, Math.min(37.2, parseFloat((prev + getVariation(-0.05, 0.05)).toFixed(1)))));
           setNibpSys(prev => Math.max(130, Math.min(145, Math.round(prev + getVariation(-3, 3)))));
           setNibpDia(prev => Math.max(85, Math.min(95, Math.round(prev + getVariation(-2, 2)))));
@@ -213,7 +210,6 @@ export default function PatientMonitor() {
         } else if (alarmType === 'FEVER') {
           setHeartRate(prev => Math.min(115, Math.max(100, Math.round(prev + getVariation(-2, 2)))));
           setSpo2(prev => Math.max(95, Math.min(97, Math.round(prev + getVariation(-0.5, 0.5)))));
-          setEtco2(prev => Math.max(42, Math.min(46, Math.round(prev + getVariation(-1, 1)))));
           setTemp(prev => Math.min(39.7, Math.max(39.1, parseFloat((prev + getVariation(-0.1, 0.1)).toFixed(1)))));
           setNibpSys(prev => Math.max(118, Math.min(128, Math.round(prev + getVariation(-2, 2)))));
           setNibpDia(prev => Math.max(76, Math.min(84, Math.round(prev + getVariation(-1, 1)))));
@@ -235,10 +231,6 @@ export default function PatientMonitor() {
         setTemp(prev => {
           const change = getVariation(-0.05, 0.05);
           return Math.min(37.4, Math.max(36.2, parseFloat((prev + change).toFixed(1))));
-        });
-        setEtco2(prev => {
-          const change = Math.round(getVariation(-1, 1.5));
-          return Math.min(42, Math.max(35, prev + change));
         });
         setNibpSys(prev => {
           const change = Math.round(getVariation(-2, 2));
@@ -262,7 +254,6 @@ export default function PatientMonitor() {
         hr: hrRef.current,
         spo2,
         temp,
-        etco2,
         nibp: `${nibpSys}/${nibpDia}`,
         arrhythmia,
         alarm: alarmActive ? alarmType : 'NONE'
@@ -282,7 +273,7 @@ export default function PatientMonitor() {
     }, 2000);
     
     return () => clearInterval(interval);
-  }, [spo2, temp, etco2, nibpSys, nibpDia, arrhythmia, alarmActive, alarmType, isRecording]);
+  }, [spo2, temp, nibpSys, nibpDia, arrhythmia, alarmActive, alarmType, isRecording]);
 
   // Live ticking clock (every 1 second)
   useEffect(() => {
@@ -485,7 +476,6 @@ export default function PatientMonitor() {
     setHeartRate(72);
     setSpo2(98);
     setTemp(36.8);
-    setEtco2(38);
     setNibpSys(120);
     setNibpDia(80);
     setArrhythmia('Normal Sinus');
@@ -503,7 +493,6 @@ export default function PatientMonitor() {
           hr: 70 + Math.round(Math.random() * 5),
           spo2: 98 + (Math.random() > 0.7 ? -1 : 0),
           temp: 36.7 + parseFloat((Math.random() * 0.2).toFixed(1)),
-          etco2: 37 + Math.round(Math.random() * 2),
           nibp: '121/79',
           arrhythmia: 'Normal Sinus',
           alarm: 'NONE'
@@ -511,11 +500,11 @@ export default function PatientMonitor() {
       });
     }
 
-    const headers = ['Timestamp', 'Heart Rate (BPM)', 'SpO2 (%)', 'Temp (C)', 'EtCO2 (mmHg)', 'NIBP (mmHg)', 'Rhythm', 'Alarm Status'];
+    const headers = ['Timestamp', 'Heart Rate (BPM)', 'SpO2 (%)', 'Temp (C)', 'NIBP (mmHg)', 'Rhythm', 'Alarm Status'];
     const csvRows = [
       headers.join(','),
       ...dataToExport.map(row => 
-        `"${row.time}",${row.hr},${row.spo2},${row.temp},${row.etco2},"${row.nibp}","${row.arrhythmia}","${row.alarm}"`
+        `"${row.time}",${row.hr},${row.spo2},${row.temp},"${row.nibp}","${row.arrhythmia}","${row.alarm}"`
       )
     ];
 
@@ -549,7 +538,6 @@ export default function PatientMonitor() {
   const hrAlert = heartRate > 100 || heartRate < 55;
   const spo2Alert = spo2 < 95;
   const tempAlert = temp > 37.8 || temp < 35.8;
-  const etco2Alert = etco2 > 45 || etco2 < 34;
   const nibpAlert = nibpSys > 140 || nibpSys < 90 || nibpDia > 90 || nibpDia < 55;
   const rhythmAlert = arrhythmia !== 'Normal Sinus';
 
@@ -707,33 +695,6 @@ export default function PatientMonitor() {
               </div>
             </div>
 
-            {/* EtCO2 Card (Orange) */}
-            <div className={`border rounded-lg p-3 relative flex flex-col justify-between shadow-lg h-[130px] transition-all duration-300 ${
-              etco2Alert 
-                ? 'bg-red-950/20 border-red-500 shadow-red-950/30' 
-                : 'bg-slate-900 border-slate-800'
-            }`}>
-              <div className="flex justify-between items-start">
-                <div className="text-orange-400 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
-                  <WindIcon className="w-4 h-4" />
-                  EtCO₂
-                </div>
-                <span className="text-[9px] text-slate-500 uppercase">Range: 35-45 mmHg</span>
-              </div>
-              <div className="flex items-baseline justify-between">
-                <span className={`text-5xl font-extrabold tracking-tighter ${etco2Alert ? 'text-red-500 animate-pulse' : 'text-orange-400'}`}>
-                  {etco2}
-                </span>
-                <span className="text-orange-500 text-sm font-semibold">mmHg</span>
-              </div>
-              <div className="flex justify-between items-center text-[10px] text-slate-400">
-                <span>Capnography</span>
-                <span className={etco2Alert ? 'text-red-400 font-bold' : 'text-orange-500 font-bold'}>
-                  {etco2Alert ? 'OUT OF RANGE' : 'NORMAL'}
-                </span>
-              </div>
-            </div>
-
             {/* NIBP Card (Purple) */}
             <div className={`border rounded-lg p-3 relative flex flex-col justify-between shadow-lg h-[130px] transition-all duration-300 ${
               nibpAlert 
@@ -865,29 +826,6 @@ export default function PatientMonitor() {
                       <svg className="w-16 h-5 inline-block text-cyan-400" viewBox="0 0 100 20">
                         <path
                           d={`M 0 10 L 10 11 L 20 10 L 30 11 L 40 10 L 50 ${temp > 38 ? 2 : 11} L 60 ${temp > 38 ? 1 : 10} L 70 10 L 80 11 L 90 10 L 100 9`}
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          strokeLinecap="round"
-                        />
-                      </svg>
-                    </td>
-                  </tr>
-                  {/* EtCO2 row */}
-                  <tr>
-                    <td className="py-2 text-slate-300 font-semibold flex items-center gap-1">
-                      <span className="h-1.5 w-1.5 rounded-full bg-orange-500"></span> EtCO₂
-                    </td>
-                    <td className="py-2 text-right font-bold text-orange-400">{etco2} <span className="text-[9px] text-slate-500 font-normal">mmHg</span></td>
-                    <td className="py-2 text-center">
-                      <span className={`px-1.5 py-0.5 rounded text-[9px] ${etco2Alert ? 'bg-red-950 text-red-400 border border-red-900/40' : 'bg-emerald-950 text-emerald-400 border border-emerald-900/30'}`}>
-                        {etco2Alert ? 'ALERT' : 'OK'}
-                      </span>
-                    </td>
-                    <td className="py-2 text-right">
-                      <svg className="w-16 h-5 inline-block text-orange-400" viewBox="0 0 100 20">
-                        <path
-                          d="M 0 10 L 10 11 L 20 8 L 30 10 L 40 12 L 50 9 L 60 11 L 70 12 L 80 9 L 90 10 L 100 11"
                           fill="none"
                           stroke="currentColor"
                           strokeWidth="1.5"
@@ -1061,7 +999,6 @@ export default function PatientMonitor() {
                   <p className="text-slate-200"><b className="text-white">Heart Rate:</b> {heartRate} bpm</p>
                   <p className="text-slate-200"><b className="text-white">SpO₂ Level:</b> {spo2}%</p>
                   <p className="text-slate-200"><b className="text-white">Temperature:</b> {temp}°C</p>
-                  <p className="text-slate-200"><b className="text-white">EtCO₂:</b> {etco2} mmHg</p>
                   <p className="text-slate-200"><b className="text-white">Blood Press:</b> {nibpSys}/{nibpDia} mmHg</p>
                 </div>
               </div>
@@ -1076,7 +1013,7 @@ export default function PatientMonitor() {
                       </p>
                     ) : (
                       <p className="text-slate-300 leading-relaxed">
-                        Continuous Lead I ECG shows normal P-Q-R-S-T morphology representing synchronized sinus depolarization. Oxygen saturation (SpO2) and end-tidal CO2 levels are stable, reflecting normal respiratory efficiency. Temperature and arterial blood pressures are well controlled. No acute arrhythmias detected.
+                        Continuous Lead I ECG shows normal P-Q-R-S-T morphology representing synchronized sinus depolarization. Oxygen saturation (SpO2) levels are stable, reflecting normal respiratory efficiency. Temperature and arterial blood pressures are well controlled. No acute arrhythmias detected.
                       </p>
                     )}
                   </div>
