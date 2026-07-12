@@ -4,3 +4,4 @@ supabase
 ollama
 python-dotenv
 pydantic
+paho-mqtt

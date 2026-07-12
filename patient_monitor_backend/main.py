@@ -1,21 +1,28 @@
+import asyncio
 import os
 import logging
 from contextlib import asynccontextmanager
+from typing import Any
 
 import torch
 import torch.nn as nn
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Depends
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Depends, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client, Client
 import ollama
 from dotenv import load_dotenv
 
+import auth
+import ws_manager
+from config import ECG_SEQUENCE_LEN, MQTT_BROKER_HOST, MQTT_BROKER_PORT, SIMULATE_ESP32
+from state import patient_history
+
 load_dotenv()
 
 # --- 0. LOGGING ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger("medlink")
+logger = logging.getLogger("patient_monitor")
 
 # --- 1. CONFIGURATION (from environment, never hardcoded) ---
 SUPABASE_URL = os.environ["SUPABASE_URL"]
@@ -25,7 +32,6 @@ OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 LOCAL_MODEL_NAME = os.environ.get("LOCAL_MODEL_NAME", "qwen2.5:1.5b")
 ECG_MODEL_PATH = os.environ.get("ECG_MODEL_PATH", "ecg_model_100hz.pt")
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
-ECG_SEQUENCE_LEN = 100
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 ollama_client = ollama.Client(host=OLLAMA_HOST, timeout=15)  # don't hang forever on a stuck LLM
@@ -75,10 +81,31 @@ async def lifespan(app: FastAPI):
         raise RuntimeError(
             f"Refusing to start: ECG model could not be loaded ({e})"
         ) from e
+
+    stop_event = asyncio.Event()
+    app.state.mqtt_stop_event = stop_event
+    try:
+        import mqtt_subscriber
+        app.state.mqtt_task = asyncio.create_task(mqtt_subscriber.start_subscriber(stop_event))
+        if SIMULATE_ESP32:
+            import mqtt_simulator
+            app.state.simulator_task = asyncio.create_task(mqtt_simulator.start_simulator(stop_event))
+            logger.info("ESP32 simulator running for PT-000001 — set SIMULATE_ESP32=false when hardware is connected")
+    except Exception as exc:
+        logger.exception("Failed to start MQTT services: %s", exc)
+        raise
+
     yield
 
+    stop_event.set()
+    if hasattr(app.state, "mqtt_task"):
+        await app.state.mqtt_task
+    if hasattr(app.state, "simulator_task"):
+        await app.state.simulator_task
 
-app = FastAPI(title="MedLink AI Telemetry Pipeline Backend", lifespan=lifespan)
+
+app = FastAPI(title="Patient Monitor Backend", lifespan=lifespan)
+app.include_router(auth.router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -201,4 +228,69 @@ async def process_telemetry(payload: ProcessRequest, background_tasks: Backgroun
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "model_loaded": ecg_model is not None}
+    from config import SIMULATE_ESP32, MQTT_TOPIC_PREFIX, SIMULATED_PATIENT_ID
+    return {
+        "status": "ok",
+        "model_loaded": ecg_model is not None,
+        "mqtt_topic_prefix": MQTT_TOPIC_PREFIX,
+        "esp32_simulation": SIMULATE_ESP32,
+        "simulated_patient_id": SIMULATED_PATIENT_ID if SIMULATE_ESP32 else None,
+    }
+
+
+@app.get("/api/patients/search")
+async def search_patients(q: str = ""):
+    response = supabase.table("patients").select("patient_id,full_name,age,gender,ward,room,bed_number,active").eq("active", True).execute()
+    patients = response.data or []
+    if q:
+        q_lower = q.lower()
+        patients = [
+            p for p in patients
+            if q_lower in str(p.get("full_name", "")).lower() or q_lower in str(p.get("patient_id", "")).lower()
+        ]
+    return patients
+
+
+@app.get("/api/patients/{patient_id}/latest")
+async def get_latest_reading(patient_id: str):
+    history = patient_history.get(patient_id)
+    if not history:
+        raise HTTPException(status_code=404, detail="No telemetry history for this patient")
+    return history[-1]
+
+
+@app.get("/api/ward/triage")
+async def ward_triage():
+    severity_rank = {"critical": 0, "watch": 1, "stable": 2}
+    latest_entries = []
+    for patient_id, history in patient_history.items():
+        if not history:
+            continue
+        latest = history[-1]
+        latest_entries.append({
+            "patient_id": patient_id,
+            "severity": latest.get("severity", "watch"),
+            "spo2": latest.get("spo2"),
+            "max_bpm": latest.get("max_bpm"),
+            "temperature_c": latest.get("temperature_c"),
+            "summary": latest.get("summary", ""),
+            "room": latest.get("room"),
+            "bed_number": latest.get("bed_number"),
+        })
+    return sorted(latest_entries, key=lambda item: severity_rank.get(item["severity"], 1))
+
+
+@app.websocket("/ws/{patient_id}")
+async def websocket_endpoint(websocket: WebSocket, patient_id: str):
+    await websocket.accept()
+    await ws_manager.register(patient_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except asyncio.CancelledError:
+        # Normal cancellation during shutdown or connection teardown.
+        pass
+    except Exception:
+        pass
+    finally:
+        await ws_manager.unregister(patient_id, websocket)

@@ -1,26 +1,29 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <SPI.h>
-#include "MAX30105.h"        
-#include "spo2_algorithm.h"  
+#include "MAX30105.h"
+#include "spo2_algorithm.h"
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <WiFi.h>
-#include <HTTPClient.h>
+#include <PubSubClient.h>      // NEW -- replaces HTTPClient. Install "PubSubClient" by Nick O'Leary via Library Manager
 #include <ArduinoJson.h>
 
-// --- Wi-Fi & Supabase Credentials ---
+// --- Wi-Fi (local network only -- no internet required past this point) ---
 const char* ssid = "BME STARLINK";
 const char* password = "e-medi987321";
 
-// Notice the added endpoint path: /rest/v1/health_metrics
-const char* supabase_url = "https://vhtxapggqeagkddcrnmv.supabase.co/rest/v1/health_metrics";
-const char* supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZodHhhcGdncWVhZ2tkZGNybm12Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1Mzg4OTAsImV4cCI6MjA5OTExNDg5MH0.Ouaj9U3Nw1btVsRnGtFWNgeH3mV0Jz94NwTMRI4xb04";
+// --- MQTT (Raspberry Pi broker on the same LAN) ---
+const char* mqtt_broker = "192.168.1.89";   // your Pi's IP
+const int   mqtt_port   = 1883;
+const char* patient_id  = "PT-000001";       // which patient this device is attached to
 
-unsigned long lastDbUploadTime = 0;
-const unsigned long dbUploadInterval = 5000; // Upload every 5 seconds
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+unsigned long lastMqttAttempt = 0;
+const unsigned long mqttRetryInterval = 5000;
 
 // --- OLED SPI Settings ---
 #define SCREEN_WIDTH 128
@@ -41,22 +44,22 @@ unsigned long lastTempRequest = 0;
 
 // --- MAX30102 Settings ---
 MAX30105 particleSensor;
-uint32_t irBuffer[100];  
-uint32_t redBuffer[100]; 
-int32_t bufferLength = 100; 
+uint32_t irBuffer[100];
+uint32_t redBuffer[100];
+int32_t bufferLength = 100;
 int bufferIndex = 0;
 
-int32_t spo2;           
-int8_t validSPO2;       
-int32_t heartRate;      
-int8_t validHeartRate;  
+int32_t spo2;
+int8_t validSPO2;
+int32_t heartRate;
+int8_t validHeartRate;
 
 // --- ECG Pinout & Filtering ---
 const int LO_PLUS  = 32;
 const int LO_MINUS = 33;
 const int ECG_PIN  = 34;
 
-const float fs = 100.0; 
+const float fs = 100.0;
 const unsigned long samplingPeriod = 1000000UL / fs;
 unsigned long lastSampleTime = 0;
 const float dt = 1.0 / fs;
@@ -71,13 +74,17 @@ const float Q  = 30.0;
 float notch_b0, notch_b1, notch_b2, notch_a1, notch_a2;
 float notch_x1 = 0, notch_x2 = 0, notch_y1 = 0, notch_y2 = 0;
 
-const int ECG_PEAK_THRESHOLD = 2600; 
-const unsigned long ECG_REFRACTORY_MS = 250; 
+const int ECG_PEAK_THRESHOLD = 2600;
+const unsigned long ECG_REFRACTORY_MS = 250;
 unsigned long lastEcgPeakTime = 0;
 float ecgBpm = 0.0;
-float ecgBpmHistory[5]; 
+float ecgBpmHistory[5];
 int ecgBpmIndex = 0;
 int ecgBeatCount = 0;
+
+// --- NEW: raw ECG window buffer for the 1D-CNN (100 samples = 1 second at 100Hz) ---
+float ecgRawBuffer[100];
+int ecgRawIndex = 0;
 
 // --- Filter Functions ---
 float highPassFilter(float x) {
@@ -96,46 +103,59 @@ float notchFilter(float x) {
   notch_x2 = notch_x1; notch_x1 = x; notch_y2 = notch_y1; notch_y1 = y; return y;
 }
 
-// --- Supabase Upload Function ---
-void sendDataToSupabase() {
-  if (WiFi.status() == WL_CONNECTED) {
-    HTTPClient http;
-    http.begin(supabase_url);
-    
-    // Required headers for Supabase REST API
-    http.addHeader("Content-Type", "application/json");
-    http.addHeader("apikey", supabase_key);
-    http.addHeader("Authorization", String("Bearer ") + supabase_key);
-    http.addHeader("Prefer", "return=minimal");
-
-    // Build JSON payload
-    StaticJsonDocument<200> doc;
-    doc["ecg_bpm"] = (ecgBpm > 0) ? ecgBpm : 0;
-    doc["max_bpm"] = (heartRate > 0) ? heartRate : 0;
-    doc["spo2"] = (spo2 > 0) ? spo2 : 0;
-    
-    // Only send temp if it's a valid reading (DS18B20 returns -127 on error)
-    if (bodyTempC > -10.0) {
-      doc["temperature_c"] = bodyTempC;
-    } else {
-      doc["temperature_c"] = 0;
+// --- Keep MQTT connected without blocking the sensor loop or OLED ---
+void maintainMqttConnection() {
+  if (!mqttClient.connected()) {
+    unsigned long now = millis();
+    if (now - lastMqttAttempt > mqttRetryInterval) {
+      lastMqttAttempt = now;
+      Serial.print("Attempting MQTT connection...");
+      String clientId = "ESP32-" + String(patient_id);
+      if (mqttClient.connect(clientId.c_str())) {
+        Serial.println("connected");
+      } else {
+        Serial.print("failed, rc=");
+        Serial.println(mqttClient.state());
+        // Sensors and OLED keep running regardless -- this failure only
+        // means this second's reading won't reach the dashboard/history.
+      }
     }
+    return;
+  }
+  mqttClient.loop();
+}
 
-    String requestBody;
-    serializeJson(doc, requestBody);
+// --- Publish one second's worth of telemetry over MQTT ---
+void publishTelemetry() {
+  if (!mqttClient.connected()) {
+    Serial.println("MQTT offline -- skipping publish (display still live locally)");
+    return;
+  }
 
-    // Send POST request
-    int httpResponseCode = http.POST(requestBody);
+  DynamicJsonDocument doc(4096);
+  doc["patient_id"] = patient_id;
+  doc["timestamp"] = millis();
+  doc["spo2"] = (spo2 > 0) ? spo2 : 0;
+  doc["max_bpm"] = (heartRate > 0) ? heartRate : 0;
+  doc["temperature_c"] = (bodyTempC > -10.0) ? bodyTempC : 0;
+  doc["nibp_sys"] = nullptr;   // no NIBP sensor on this hardware -- left null on purpose
+  doc["nibp_dia"] = nullptr;
 
-    if (httpResponseCode > 0) {
-      Serial.printf("DB Upload OK: %d\n", httpResponseCode);
-    } else {
-      Serial.printf("DB Upload Error: %s\n", http.errorToString(httpResponseCode).c_str());
-    }
-    
-    http.end();
+  JsonArray ecgArray = doc.createNestedArray("raw_ecg");
+  for (int i = 0; i < 100; i++) {
+    ecgArray.add(ecgRawBuffer[i]);
+  }
+
+  char payload[4096];
+  size_t len = serializeJson(doc, payload);
+
+  char topic[64];
+  snprintf(topic, sizeof(topic), "patient-monitor/%s/telemetry", patient_id);
+
+  if (mqttClient.publish(topic, payload, len)) {
+    Serial.println("Published telemetry");
   } else {
-    Serial.println("WiFi Disconnected. Cannot send data.");
+    Serial.println("Publish failed -- payload likely exceeds MQTT buffer size");
   }
 }
 
@@ -144,37 +164,41 @@ void setup() {
   delay(500);
 
   // 1. Setup OLED
-  if(!display.begin(SSD1306_SWITCHCAPVCC)) {
+  if (!display.begin(SSD1306_SWITCHCAPVCC)) {
     Serial.println("SSD1306 allocation failed");
-    for(;;);
+    for (;;);
   }
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0,10);
+  display.setCursor(0, 10);
   display.println("Booting System...");
   display.display();
 
-  // 2. Connect to Wi-Fi
-  display.setCursor(0,25);
+  // 2. Connect to Wi-Fi (local network -- no internet required)
+  display.setCursor(0, 25);
   display.print("WiFi: ");
   display.println(ssid);
   display.display();
-  
+
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
   Serial.println("\nWiFi connected!");
-  display.setCursor(0,40);
+  display.setCursor(0, 40);
   display.println("WiFi Connected!");
   display.display();
   delay(1000);
 
+  // 2b. Setup MQTT
+  mqttClient.setServer(mqtt_broker, mqtt_port);
+  mqttClient.setBufferSize(4096);   // default 256 bytes is far too small for a 100-sample ECG array
+
   // 3. Setup DS18B20 (Non-blocking mode)
   sensors.begin();
-  sensors.setWaitForConversion(false); 
+  sensors.setWaitForConversion(false);
   sensors.requestTemperatures();
   lastTempRequest = millis();
 
@@ -197,33 +221,30 @@ void setup() {
   yHPF_prev = 0; xHPF_prev = initialValue; yLPF_prev = initialValue;
 
   // 5. Setup MAX30102
-  Wire.begin(21, 22); 
+  Wire.begin(21, 22);
   if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
     display.clearDisplay();
-    display.setCursor(0,20);
+    display.setCursor(0, 20);
     display.println("MAX30102 Error");
     display.display();
-    while (1); 
+    while (1);
   }
-  particleSensor.setup(60, 4, 2, 100, 411, 4096); 
-  
+  particleSensor.setup(60, 4, 2, 100, 411, 4096);
+
   display.clearDisplay();
 }
 
 void loop() {
   unsigned long nowUs = micros();
   unsigned long nowMs = millis();
-  
-  // --- Background Task 1: Upload to Supabase every 5 seconds ---
-  if (nowMs - lastDbUploadTime >= dbUploadInterval) {
-    sendDataToSupabase();
-    lastDbUploadTime = nowMs;
-  }
 
-  // --- Background Task 2: Update Temperature every 1 second ---
+  // Keep MQTT alive -- non-blocking, never stalls sensor reads or the OLED
+  maintainMqttConnection();
+
+  // --- Update Temperature every 1 second ---
   if (nowMs - lastTempRequest >= 1000) {
     bodyTempC = sensors.getTempCByIndex(0);
-    sensors.requestTemperatures(); // Start next reading
+    sensors.requestTemperatures();
     lastTempRequest = nowMs;
   }
 
@@ -232,77 +253,80 @@ void loop() {
     lastSampleTime = nowUs;
 
     // 1. Read ECG
-    int ecgOutput = 2048; 
-    
-    if((digitalRead(LO_PLUS) == 1) || (digitalRead(LO_MINUS) == 1)){
+    int ecgOutput = 2048;
+
+    if ((digitalRead(LO_PLUS) == 1) || (digitalRead(LO_MINUS) == 1)) {
       ecgBpm = 0; ecgBeatCount = 0;
     } else {
       float x = (float)analogRead(ECG_PIN);
       float y1 = highPassFilter(x);
       float y2 = lowPassFilter(y1);
       float y3 = notchFilter(y2);
-      ecgOutput = (int)round(y3 + 2048.0f); 
+      ecgOutput = (int)round(y3 + 2048.0f);
 
       if (ecgOutput > ECG_PEAK_THRESHOLD && (nowMs - lastEcgPeakTime > ECG_REFRACTORY_MS)) {
         unsigned long beatInterval = nowMs - lastEcgPeakTime;
         lastEcgPeakTime = nowMs;
-        if (beatInterval > 300 && beatInterval < 2000) { 
-          float currentBpm = 60000.0 / beatInterval; 
+        if (beatInterval > 300 && beatInterval < 2000) {
+          float currentBpm = 60000.0 / beatInterval;
           ecgBpmHistory[ecgBpmIndex] = currentBpm;
           ecgBpmIndex = (ecgBpmIndex + 1) % 5;
           if (ecgBeatCount < 5) ecgBeatCount++;
-          
+
           float sum = 0;
-          for(int i = 0; i < ecgBeatCount; i++) sum += ecgBpmHistory[i];
+          for (int i = 0; i < ecgBeatCount; i++) sum += ecgBpmHistory[i];
           ecgBpm = sum / ecgBeatCount;
         }
       }
     }
 
+    // NEW: capture this sample into the raw ECG window for the CNN
+    ecgRawBuffer[ecgRawIndex] = (float)ecgOutput;
+    ecgRawIndex++;
+    if (ecgRawIndex >= 100) {
+      publishTelemetry();   // fires once per second, once the window is full
+      ecgRawIndex = 0;
+    }
+
     // 2. Read MAX30102
-    particleSensor.check(); 
+    particleSensor.check();
     while (particleSensor.available()) {
       redBuffer[bufferIndex] = particleSensor.getFIFORed();
       irBuffer[bufferIndex] = particleSensor.getFIFOIR();
-      particleSensor.nextSample(); 
+      particleSensor.nextSample();
       bufferIndex++;
-      if (bufferIndex >= 100) break; 
+      if (bufferIndex >= 100) break;
     }
 
     // 3. Send ONLY ECG to Serial Plotter
     Serial.println(ecgOutput);
 
-    // 4. Calculate SpO2 & Update OLED (Runs 4 times a second)
+    // 4. Calculate SpO2 & Update OLED (runs 4 times a second)
     if (bufferIndex >= 100) {
       maxim_heart_rate_and_oxygen_saturation(irBuffer, bufferLength, redBuffer, &spo2, &validSPO2, &heartRate, &validHeartRate);
 
-      // Clean up invalid readings
-      if(!validHeartRate || heartRate > 200 || heartRate < 30) heartRate = 0;
-      if(!validSPO2 || spo2 > 100 || spo2 < 50) spo2 = 0;
+      if (!validHeartRate || heartRate > 200 || heartRate < 30) heartRate = 0;
+      if (!validSPO2 || spo2 > 100 || spo2 < 50) spo2 = 0;
 
-      // Update OLED Display
+      // OLED always updates locally, regardless of WiFi/MQTT status
       display.clearDisplay();
       display.setTextSize(2);
-      
-      // Row 1: ECG BPM
+
       display.setCursor(0, 0);
       display.print("ECG: ");
-      if (ecgBpm > 0) display.print((int)ecgBpm); 
+      if (ecgBpm > 0) display.print((int)ecgBpm);
       else display.print("--");
 
-      // Row 2: MAX BPM
       display.setCursor(0, 16);
       display.print("MAX: ");
-      if (heartRate > 0) display.print(heartRate); 
+      if (heartRate > 0) display.print(heartRate);
       else display.print("--");
 
-      // Row 3: SpO2
       display.setCursor(0, 32);
       display.print("O2 : ");
       if (spo2 > 0) { display.print(spo2); display.print("%"); }
       else display.print("--%");
 
-      // Row 4: Temperature
       display.setCursor(0, 48);
       display.print("TMP: ");
       if (bodyTempC > -10.0) { display.print(bodyTempC, 1); display.print("C"); }
@@ -310,12 +334,11 @@ void loop() {
 
       display.display();
 
-      // Shift MAX buffer
       for (byte i = 25; i < 100; i++) {
         redBuffer[i - 25] = redBuffer[i];
         irBuffer[i - 25] = irBuffer[i];
       }
-      bufferIndex = 75; 
+      bufferIndex = 75;
     }
   }
 }
