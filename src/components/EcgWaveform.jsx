@@ -43,16 +43,16 @@ function drawGrid(ctx, width, height) {
   }
 }
 
-function syntheticVoltage(t) {
-  if (t >= 0.02 && t < 0.1) return 0.12 * Math.sin(Math.PI * (t - 0.02) / 0.08);
-  if (t >= 0.12 && t < 0.14) return -0.15 * Math.sin(Math.PI * (t - 0.12) / 0.02);
-  if (t >= 0.14 && t < 0.17) return 1.25 * Math.sin(Math.PI * (t - 0.14) / 0.03);
-  if (t >= 0.17 && t < 0.21) return -0.35 * Math.sin(Math.PI * (t - 0.17) / 0.04);
-  if (t >= 0.24 && t < 0.4) return 0.25 * Math.sin(Math.PI * (t - 0.24) / 0.16);
-  return 0;
+function drawBaseline(ctx, width, height, baselineY) {
+  ctx.strokeStyle = "rgba(57, 255, 20, 0.35)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(0, baselineY);
+  ctx.lineTo(width, baselineY);
+  ctx.stroke();
 }
 
-function normalizeSamples(samples, baseline = 2048) {
+function normalizeSamples(samples) {
   if (!samples?.length) return [];
   const values = samples.map((v) => Number(v));
   const min = Math.min(...values);
@@ -61,25 +61,20 @@ function normalizeSamples(samples, baseline = 2048) {
   return values.map((v) => (v - (min + max) / 2) / range);
 }
 
-export default function EcgWaveform({ mode = "synthetic", heartRate = 72, rawEcg = null, className = "" }) {
+export default function EcgWaveform({ rawEcg = null, hasSignal = false, className = "" }) {
   const canvasRef = useRef(null);
-  const hrRef = useRef(heartRate);
   const sampleQueueRef = useRef([]);
   const lastYRef = useRef(0);
   const sweepXRef = useRef(0);
 
   useEffect(() => {
-    hrRef.current = heartRate;
-  }, [heartRate]);
-
-  useEffect(() => {
-    if (mode !== "live" || !rawEcg?.length) return;
+    if (!hasSignal || !rawEcg?.length) return;
     const normalized = normalizeSamples(rawEcg);
     sampleQueueRef.current.push(...normalized);
     if (sampleQueueRef.current.length > 2000) {
       sampleQueueRef.current = sampleQueueRef.current.slice(-1000);
     }
-  }, [mode, rawEcg]);
+  }, [rawEcg, hasSignal]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -91,7 +86,6 @@ export default function EcgWaveform({ mode = "synthetic", heartRate = 72, rawEcg
     const dpr = window.devicePixelRatio || 1;
     let animationId;
     let lastTime = performance.now();
-    let beatTime = 0;
     let width = 0;
     let height = 0;
     let baselineY = 0;
@@ -106,6 +100,7 @@ export default function EcgWaveform({ mode = "synthetic", heartRate = 72, rawEcg
       canvas.height = height * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       drawGrid(ctx, width, height);
+      drawBaseline(ctx, width, height, baselineY);
       lastYRef.current = baselineY;
       sweepXRef.current = 0;
       return true;
@@ -137,26 +132,12 @@ export default function EcgWaveform({ mode = "synthetic", heartRate = 72, rawEcg
       const dt = Math.min((time - lastTime) / 1000, 0.05);
       lastTime = time;
 
-      if (mode === "synthetic") {
-        const hr = hrRef.current || 72;
-        const beatDuration = 60 / hr;
-        beatTime += dt;
-        if (beatTime >= beatDuration) beatTime -= beatDuration;
-
-        const speed = 180;
-        const dx = speed * dt;
-        const nextX = (sweepXRef.current + dx) % width;
-        const voltage = syntheticVoltage(beatTime);
-        const nextY = baselineY - voltage * 55;
-
-        if (nextX < sweepXRef.current) {
-          drawGrid(ctx, width, height);
-          lastYRef.current = baselineY;
-        }
-
-        drawSegment(sweepXRef.current, lastYRef.current, nextX, nextY);
-        sweepXRef.current = nextX;
-        lastYRef.current = nextY;
+      if (!hasSignal) {
+        drawGrid(ctx, width, height);
+        drawBaseline(ctx, width, height, baselineY);
+        sampleQueueRef.current = [];
+        sweepXRef.current = 0;
+        lastYRef.current = baselineY;
       } else {
         const samplesPerSecond = 100;
         const pixelsPerSample = 1.8;
@@ -171,6 +152,7 @@ export default function EcgWaveform({ mode = "synthetic", heartRate = 72, rawEcg
 
           if (nextX < sweepXRef.current) {
             drawGrid(ctx, width, height);
+            drawBaseline(ctx, width, height, baselineY);
             lastYRef.current = baselineY;
           }
 
@@ -199,7 +181,7 @@ export default function EcgWaveform({ mode = "synthetic", heartRate = 72, rawEcg
       cancelAnimationFrame(animationId);
       window.removeEventListener("resize", onResize);
     };
-  }, [mode]);
+  }, [hasSignal]);
 
   return (
     <div className={`relative overflow-hidden rounded-lg border border-emerald-950/50 ecg-grid ${className}`}>
@@ -211,6 +193,13 @@ export default function EcgWaveform({ mode = "synthetic", heartRate = 72, rawEcg
         <div className="text-[9px] font-bold uppercase tracking-wider text-emerald-600">Gain 10 mm/mV</div>
         <div className="text-[9px] font-bold uppercase tracking-wider text-emerald-600">25 mm/s</div>
       </div>
+      {!hasSignal && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <span className="rounded border border-slate-700 bg-black/70 px-4 py-2 text-sm font-bold uppercase tracking-widest text-slate-400">
+            No Signal
+          </span>
+        </div>
+      )}
     </div>
   );
 }

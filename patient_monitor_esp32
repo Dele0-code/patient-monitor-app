@@ -84,7 +84,9 @@ int ecgBeatCount = 0;
 
 // --- NEW: raw ECG window buffer for the 1D-CNN (100 samples = 1 second at 100Hz) ---
 float ecgRawBuffer[100];
-int ecgRawIndex = 0;
+int ecgRawIndex = 0; // next write index
+int ecgSampleCount = 0; // number of valid samples currently in buffer (<=100)
+unsigned long lastPublishMs = 0;
 
 // --- Filter Functions ---
 float highPassFilter(float x) {
@@ -125,14 +127,14 @@ void maintainMqttConnection() {
   mqttClient.loop();
 }
 
-// --- Publish one second's worth of telemetry over MQTT ---
-void publishTelemetry() {
+// --- Publish the most recent ECG window and vitals over MQTT ---
+void publishTelemetry(int sampleCount, int nextIndex) {
   if (!mqttClient.connected()) {
     Serial.println("MQTT offline -- skipping publish (display still live locally)");
     return;
   }
 
-  DynamicJsonDocument doc(4096);
+  DynamicJsonDocument doc(8192);
   doc["patient_id"] = patient_id;
   doc["timestamp"] = millis();
   doc["spo2"] = (spo2 > 0) ? spo2 : 0;
@@ -142,11 +144,36 @@ void publishTelemetry() {
   doc["nibp_dia"] = nullptr;
 
   JsonArray ecgArray = doc.createNestedArray("raw_ecg");
-  for (int i = 0; i < 100; i++) {
-    ecgArray.add(ecgRawBuffer[i]);
+
+  // Determine start index (oldest sample) for up to 100 values.
+  int count = sampleCount;
+  if (count > 100) count = 100;
+
+  int startIdx;
+  if (count == 100) {
+    // nextIndex is the index where the next sample will be written,
+    // so the oldest sample is at nextIndex.
+    startIdx = nextIndex % 100;
+  } else {
+    // buffer not yet full: oldest sample is at (nextIndex - count)
+    startIdx = (nextIndex - count + 100) % 100;
   }
 
-  char payload[4096];
+  // Append available samples in chronological order, then pad to 100
+  for (int i = 0; i < count; i++) {
+    int idx = (startIdx + i) % 100;
+    ecgArray.add(ecgRawBuffer[idx]);
+  }
+
+  float padValue = 0.0f;
+  if (count > 0) {
+    int lastIdx = (startIdx + count - 1) % 100;
+    padValue = ecgRawBuffer[lastIdx];
+  }
+  // pad remaining values to reach 100 samples expected by the backend
+  for (int i = count; i < 100; i++) ecgArray.add(padValue);
+
+  char payload[8192];
   size_t len = serializeJson(doc, payload);
 
   char topic[64];
@@ -280,12 +307,16 @@ void loop() {
       }
     }
 
-    // NEW: capture this sample into the raw ECG window for the CNN
+    // NEW: capture this sample into the circular raw ECG buffer for the CNN
     ecgRawBuffer[ecgRawIndex] = (float)ecgOutput;
-    ecgRawIndex++;
-    if (ecgRawIndex >= 100) {
-      publishTelemetry();   // fires once per second, once the window is full
-      ecgRawIndex = 0;
+    ecgRawIndex = (ecgRawIndex + 1) % 100; // advance write pointer
+    if (ecgSampleCount < 100) ecgSampleCount++;
+
+    // Publish the most recent 100-sample window every ~1000 ms (wall-clock).
+    if (nowMs - lastPublishMs >= 1000UL && ecgSampleCount > 0) {
+      // publishTelemetry will build the array from the circular buffer
+      publishTelemetry(ecgSampleCount, ecgRawIndex);
+      lastPublishMs = nowMs;
     }
 
     // 2. Read MAX30102

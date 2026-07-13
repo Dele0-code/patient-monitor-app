@@ -10,6 +10,8 @@ import logging
 import math
 import random
 import time
+import traceback
+import asyncio
 from typing import Any
 
 import paho.mqtt.client as mqtt
@@ -91,7 +93,14 @@ def build_payload(patient_id: str, anomalous: bool = False) -> dict[str, Any]:
     }
 
 
-def _simulator_loop(stop_event) -> None:
+async def start_simulator(stop_event) -> None:
+    """
+    Async simulator that publishes ESP32-compatible telemetry over MQTT.
+
+    This implementation runs in the asyncio event loop, publishes at
+    `SIMULATOR_RATE_SEC` intervals, and logs tracebacks for any
+    unexpected exceptions so the loop doesn't die silently.
+    """
     patient_id = SIMULATED_PATIENT_ID
     topic = telemetry_topic(patient_id)
     client = mqtt.Client()
@@ -112,27 +121,34 @@ def _simulator_loop(stop_event) -> None:
     )
 
     try:
+        # Run until the provided asyncio Event is set.
         while not stop_event.is_set():
-            anomalous = random.random() < anomaly_rate
-            payload = build_payload(patient_id, anomalous)
-            client.publish(topic, json.dumps(payload), qos=1)
-            tag = "anomalous" if anomalous else "normal"
-            logger.debug(
-                "Simulated telemetry (%s): spo2=%s bpm=%s temp=%s",
-                tag,
-                payload["spo2"],
-                payload["max_bpm"],
-                payload["temperature_c"],
-            )
-            stop_event.wait(SIMULATOR_RATE_SEC)
+            try:
+                anomalous = random.random() < anomaly_rate
+                payload = build_payload(patient_id, anomalous)
+                client.publish(topic, json.dumps(payload), qos=1)
+                tag = "anomalous" if anomalous else "normal"
+                logger.debug(
+                    "Simulated telemetry (%s): spo2=%s bpm=%s temp=%s",
+                    tag,
+                    payload["spo2"],
+                    payload["max_bpm"],
+                    payload["temperature_c"],
+                )
+            except Exception as exc:
+                logger.exception("Exception while publishing simulated telemetry: %s", exc)
+                traceback.print_exc()
+
+            # Non-blocking sleep so other asyncio tasks can run.
+            try:
+                await asyncio.sleep(SIMULATOR_RATE_SEC)
+            except Exception as exc:
+                # Sleep shouldn't fail, but log and continue if it does.
+                logger.exception("Simulator sleep interrupted: %s", exc)
+                traceback.print_exc()
+                # small delay to avoid busy loop if sleep repeatedly fails
+                await asyncio.sleep(0.1)
     finally:
         client.loop_stop()
         client.disconnect()
         logger.info("ESP32 simulator stopped.")
-
-
-async def start_simulator(stop_event) -> None:
-    import asyncio
-
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, _simulator_loop, stop_event)

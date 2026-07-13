@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from typing import Any
 
 import ollama
@@ -14,8 +15,14 @@ from state import patient_history
 
 logger = logging.getLogger("patient_monitor.mqtt")
 
+LLM_THROTTLE_SEC = 12.0
+
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 ollama_client = ollama.Client(host=OLLAMA_HOST, timeout=15)
+
+_last_rule_severity: dict[str, str] = {}
+_last_llm_assessment: dict[str, dict[str, Any]] = {}
+_last_llm_call_time: dict[str, float] = {}
 
 
 def _normalize_ecg_window(raw_ecg: list[float]) -> list[float] | None:
@@ -207,7 +214,15 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
     })
 
     prompt = _build_prompt(patient_id, spo2, bpm, temp, rhythm_status, vitals_flag)
-    if USE_LLM:
+    rule_severity = _determine_severity(spo2, bpm, temp, rhythm_anomaly)
+    previous_rule_severity = _last_rule_severity.get(patient_id)
+    severity_changed = previous_rule_severity is not None and rule_severity != previous_rule_severity
+    now = time.monotonic()
+    last_llm_at = _last_llm_call_time.get(patient_id, 0.0)
+    throttle_elapsed = now - last_llm_at >= LLM_THROTTLE_SEC
+    should_call_llm = USE_LLM and (previous_rule_severity is None or severity_changed or throttle_elapsed)
+
+    if should_call_llm:
         try:
             llm_response = ollama_client.generate(
                 model=LOCAL_MODEL_NAME,
@@ -216,11 +231,26 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
                 options={"temperature": 0.2},
             )
             assessment = _parse_llm_response(llm_response.get("response", ""))
+            _last_llm_assessment[patient_id] = assessment
+            _last_llm_call_time[patient_id] = now
+            if severity_changed:
+                logger.info(
+                    "Severity changed for %s (%s -> %s); refreshed LLM assessment immediately",
+                    patient_id,
+                    previous_rule_severity,
+                    rule_severity,
+                )
         except Exception as exc:
             logger.warning("LLM generation failed for %s: %s", patient_id, exc)
-            assessment = _rule_based_assessment(spo2, bpm, temp, rhythm_status, vitals_flag, rhythm_anomaly)
+            assessment = _last_llm_assessment.get(patient_id) or _rule_based_assessment(
+                spo2, bpm, temp, rhythm_status, vitals_flag, rhythm_anomaly
+            )
     else:
-        assessment = _rule_based_assessment(spo2, bpm, temp, rhythm_status, vitals_flag, rhythm_anomaly)
+        assessment = _last_llm_assessment.get(patient_id) or _rule_based_assessment(
+            spo2, bpm, temp, rhythm_status, vitals_flag, rhythm_anomaly
+        )
+
+    _last_rule_severity[patient_id] = rule_severity
 
     latest_entry = patient_history[patient_id][-1]
     latest_entry.update({
