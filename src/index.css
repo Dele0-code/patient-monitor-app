@@ -6,7 +6,10 @@ html,
 body,
 #root {
   height: 100%;
+  width: 100%;
+  margin: 0;
   overflow: hidden;
+  background: #000;
 }
 
 body {
@@ -14,10 +17,7 @@ body {
   cursor: default;
   -webkit-user-select: none;
   user-select: none;
-}
-
-.ecg-grid {
-  background-color: #020a02;
+  -webkit-tap-highlight-color: transparent;
 }
 
 @keyframes fadeIn {

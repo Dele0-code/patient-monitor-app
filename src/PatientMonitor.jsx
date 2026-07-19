@@ -1,38 +1,36 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import EcgWaveform from "./components/EcgWaveform.jsx";
 import AlarmBanner from "./components/AlarmBanner.jsx";
 import ConnectionBadge from "./components/ConnectionBadge.jsx";
 import { getPatient } from "./patients.js";
 
-const NO_SIGNAL = "NO SIGNAL";
+const NO_SIGNAL = "— — —";
 
-function VitalCard({ label, value, unit, alert, colorClass = "text-emerald-400" }) {
+function VitalBlock({ label, value, unit, alert, color = "text-emerald-400", large = false }) {
   const hasValue = value !== null && value !== undefined && value !== NO_SIGNAL;
 
   return (
     <div
-      className={`flex flex-col justify-between rounded-xl border p-4 shadow-lg transition-all ${
-        alert ? "animate-pulse border-red-500 bg-red-950/10" : "border-slate-800 bg-slate-900"
+      className={`flex flex-col justify-between border-b border-slate-800 px-3 py-2 ${
+        alert ? "animate-pulse bg-red-950/40" : ""
       }`}
     >
-      <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500">{label}</div>
-      <div className="flex items-baseline gap-2">
-        {hasValue ? (
-          <>
-            <span className={`text-5xl font-extrabold tracking-tight ${colorClass}`}>{value}</span>
-            {unit && <span className={`text-sm font-semibold ${colorClass}`}>{unit}</span>}
-          </>
-        ) : (
-          <span className="text-2xl font-bold uppercase tracking-widest text-slate-600">{NO_SIGNAL}</span>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className={`text-[11px] font-bold uppercase tracking-widest ${alert ? "text-red-400" : "text-slate-500"}`}>
+          {label}
+        </span>
+        {unit && hasValue && (
+          <span className={`text-[10px] font-semibold uppercase ${alert ? "text-red-400" : color}`}>{unit}</span>
         )}
+      </div>
+      <div className={`mt-0.5 font-bold leading-none tracking-tight ${alert ? "text-red-400" : color} ${large ? "text-6xl" : "text-4xl"}`}>
+        {hasValue ? value : <span className="text-2xl tracking-widest text-slate-600">{NO_SIGNAL}</span>}
       </div>
     </div>
   );
 }
 
 export default function PatientMonitor({ patientId, liveEvent, connectionStatus }) {
-  const navigate = useNavigate();
   const patientMeta = getPatient(patientId);
   const hasData = connectionStatus === "live";
 
@@ -126,9 +124,9 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
     return () => clearInterval(interval);
   }, [hasData, severityTag, triggerBeep]);
 
-  const hrAlert = hasData && (heartRate > 100 || heartRate < 55);
-  const spo2Alert = hasData && spo2 < 95;
-  const tempAlert = hasData && (temp > 37.8 || temp < 35.8);
+  const hrAlert = hasData && heartRate != null && (heartRate > 100 || heartRate < 55);
+  const spo2Alert = hasData && spo2 != null && spo2 < 95;
+  const tempAlert = hasData && temp != null && (temp > 37.8 || temp < 35.8);
   const nibpAlert =
     hasData &&
     nibpSys != null &&
@@ -139,140 +137,121 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
   const nibpDisplay =
     !hasData || nibpSys == null || nibpDia == null ? NO_SIGNAL : `${nibpSys}/${nibpDia}`;
 
-  const displayName = liveEvent?.full_name || patientMeta?.full_name || patientId;
-  const room = liveEvent?.room || patientMeta?.room || "—";
-  const bed = liveEvent?.bed_number || patientMeta?.bed_number || "—";
+  const displayName = liveEvent?.full_name || patientMeta?.full_name || "Bedside Monitor";
+  const room = liveEvent?.room || patientMeta?.room;
+  const bed = liveEvent?.bed_number || patientMeta?.bed_number;
+  const location =
+    room && room !== "—" && bed && bed !== "—"
+      ? `${room} / ${bed}`
+      : patientMeta?.ward || "Bedside";
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-950 font-mono text-slate-100">
+    <div className="flex h-full flex-col bg-black font-mono text-slate-100">
       <AlarmBanner severity={hasData ? severityTag : null} systemFlags={systemFlags} />
 
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 bg-slate-900 px-4 py-3">
-        <div className="flex flex-wrap items-center gap-6">
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-slate-500">Patient Monitor</div>
-            <div className="text-xl font-bold text-emerald-400">{patientId}</div>
+      {/* Top status bar — device chrome */}
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-800 bg-[#0a0a0a] px-3 py-1.5">
+        <div className="flex min-w-0 items-center gap-4">
+          <div className="shrink-0">
+            <div className="text-[9px] uppercase tracking-widest text-slate-600">ID</div>
+            <div className="text-sm font-bold text-emerald-400">{patientId}</div>
           </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-slate-500">Name</div>
-            <div className="text-lg font-bold text-white">{displayName}</div>
+          <div className="min-w-0">
+            <div className="text-[9px] uppercase tracking-widest text-slate-600">Patient</div>
+            <div className="truncate text-sm font-bold text-white">{displayName}</div>
           </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-slate-500">Room / Bed</div>
-            <div className="text-lg font-bold text-slate-300">
-              {room} / {bed}
-            </div>
+          <div className="hidden shrink-0 sm:block">
+            <div className="text-[9px] uppercase tracking-widest text-slate-600">Location</div>
+            <div className="text-sm font-bold text-slate-300">{location}</div>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex shrink-0 items-center gap-5">
           <ConnectionBadge status={connectionStatus} />
           <div className="text-right">
-            <div className="text-2xl font-bold tracking-widest text-emerald-400">
-              {currentTime.toLocaleTimeString()}
+            <div className="text-lg font-bold tabular-nums tracking-wider text-emerald-400">
+              {currentTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
             </div>
-            <div className="text-xs text-slate-500">{currentTime.toLocaleDateString()}</div>
+            <div className="text-[10px] tabular-nums text-slate-500">
+              {currentTime.toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" })}
+            </div>
           </div>
         </div>
       </header>
 
-      <main className="flex flex-1 flex-col gap-3 p-3 lg:flex-row">
-        <section className="flex flex-[2] flex-col gap-3">
-          <div className="flex min-h-[280px] flex-1 flex-col rounded-xl border border-slate-800 bg-slate-900 p-3 lg:min-h-[340px]">
-            <div className="mb-2 flex items-center justify-between border-b border-slate-800 pb-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">ECG Lead I</span>
-            </div>
-            <EcgWaveform rawEcg={rawEcg} hasSignal={hasData} className="min-h-[220px] flex-1 lg:min-h-[280px]" />
-            <div className="mt-2 flex justify-end">
-              <div
-                className={`rounded border px-4 py-2 text-right ${
-                  hrAlert ? "animate-pulse border-red-500 bg-red-950/10" : "border-slate-800 bg-black/60"
-                }`}
-              >
-                <div className="text-[10px] font-bold uppercase text-emerald-600">Heart Rate</div>
-                {hasData ? (
-                  <div className="text-5xl font-extrabold text-emerald-400">
-                    {heartRate}
-                    <span className="ml-1 text-sm text-slate-500">bpm</span>
-                  </div>
-                ) : (
-                  <div className="text-2xl font-bold uppercase tracking-widest text-slate-600">{NO_SIGNAL}</div>
-                )}
-              </div>
-            </div>
-          </div>
+      {/* Main monitor body: waveform + vitals column */}
+      <main className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <section className="flex min-h-0 min-w-0 flex-[3] flex-col border-b border-slate-800 lg:border-b-0 lg:border-r">
+          <EcgWaveform rawEcg={rawEcg} hasSignal={hasData} className="min-h-[220px] flex-1" />
 
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <VitalCard label="SpO₂" value={hasData ? spo2 : NO_SIGNAL} unit="%" alert={spo2Alert} colorClass="text-cyan-400" />
-            <VitalCard
-              label="Temperature"
-              value={hasData ? temp?.toFixed(1) : NO_SIGNAL}
-              unit="°C"
-              alert={tempAlert}
-              colorClass="text-cyan-300"
-            />
-            <VitalCard label="NIBP" value={nibpDisplay} unit="mmHg" alert={nibpAlert} colorClass="text-fuchsia-400" />
-            <div
-              className={`rounded-xl border p-4 ${
-                rhythmAlert ? "animate-pulse border-red-500 bg-red-950/10" : "border-slate-800 bg-slate-900"
-              }`}
-            >
-              <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500">Rhythm</div>
-              {hasData ? (
-                <div className="mt-2 text-lg font-bold uppercase text-emerald-400">{arrhythmia}</div>
-              ) : (
-                <div className="mt-2 text-2xl font-bold uppercase tracking-widest text-slate-600">{NO_SIGNAL}</div>
+          {/* Secondary strip under ECG — rhythm + clinical note */}
+          <div className="shrink-0 border-t border-slate-800 bg-[#050505] px-3 py-2">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-[9px] uppercase tracking-widest text-slate-600">Rhythm</div>
+                <div
+                  className={`text-base font-bold uppercase tracking-wide ${
+                    rhythmAlert ? "animate-pulse text-red-400" : "text-emerald-400"
+                  }`}
+                >
+                  {hasData && arrhythmia ? arrhythmia : NO_SIGNAL}
+                </div>
+              </div>
+              {(summaryText || recommendedAction) && hasData && (
+                <div className="max-w-xl flex-1 text-right">
+                  {summaryText && <p className="text-xs leading-snug text-slate-400">{summaryText}</p>}
+                  {recommendedAction && (
+                    <p className="mt-1 text-xs font-semibold text-cyan-300">{recommendedAction}</p>
+                  )}
+                </div>
               )}
             </div>
           </div>
         </section>
 
-        <section className="flex flex-1 flex-col gap-3">
-          <div className="flex-1 rounded-xl border border-slate-800 bg-slate-900 p-4">
-            <h2 className="mb-3 border-b border-slate-800 pb-2 text-xs font-bold uppercase tracking-wider text-slate-400">
-              Clinical Assessment
-            </h2>
-            {hasData && summaryText ? (
-              <>
-                <p className="text-sm leading-relaxed text-slate-200">{summaryText}</p>
-                {recommendedAction && (
-                  <p className="mt-3 rounded border border-cyan-900/40 bg-cyan-950/20 p-3 text-sm text-cyan-200">
-                    {recommendedAction}
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className="text-2xl font-bold uppercase tracking-widest text-slate-600">{NO_SIGNAL}</p>
-            )}
-          </div>
+        {/* Right vital numerics — classic monitor column */}
+        <aside className="flex w-full shrink-0 flex-col bg-[#050505] lg:w-56 xl:w-64">
+          <VitalBlock
+            label="HR"
+            value={hasData ? heartRate : NO_SIGNAL}
+            unit="bpm"
+            alert={hrAlert}
+            color="text-emerald-400"
+            large
+          />
+          <VitalBlock
+            label="SpO₂"
+            value={hasData ? spo2 : NO_SIGNAL}
+            unit="%"
+            alert={spo2Alert}
+            color="text-sky-400"
+          />
+          <VitalBlock
+            label="NIBP"
+            value={nibpDisplay}
+            unit="mmHg"
+            alert={nibpAlert}
+            color="text-rose-300"
+          />
+          <VitalBlock
+            label="TEMP"
+            value={hasData && temp != null ? temp.toFixed(1) : NO_SIGNAL}
+            unit="°C"
+            alert={tempAlert}
+            color="text-amber-300"
+          />
 
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-            <h2 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">Controls</h2>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setAudioEnabled((v) => !v)}
-                className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-3 text-xs font-semibold uppercase hover:border-slate-500"
-              >
-                {audioEnabled ? "Mute Alarms" : "Unmute Alarms"}
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate("/")}
-                className="col-span-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-3 text-sm font-semibold hover:border-emerald-600"
-              >
-                Back to Patients
-              </button>
-            </div>
+          <div className="mt-auto border-t border-slate-800 p-2">
+            <button
+              type="button"
+              onClick={() => setAudioEnabled((v) => !v)}
+              className="w-full border border-slate-700 bg-black px-2 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:border-slate-500 hover:text-slate-200"
+            >
+              {audioEnabled ? "Mute Alarms" : "Alarms Muted"}
+            </button>
           </div>
-        </section>
+        </aside>
       </main>
-
-      <footer className="flex items-center justify-between border-t border-slate-800 bg-slate-900 px-4 py-2 text-[11px] uppercase tracking-wider text-slate-500">
-        <span>Patient Monitor</span>
-        <ConnectionBadge status={connectionStatus} />
-        <span>MQTT + WebSocket</span>
-      </footer>
     </div>
   );
 }

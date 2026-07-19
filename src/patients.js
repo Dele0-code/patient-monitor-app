@@ -1,10 +1,10 @@
 export const PATIENTS = {
   "PT-000001": {
     id: "PT-000001",
-    full_name: "Patient Monitor",
+    full_name: "Bedside Monitor",
     ward: "ICU",
-    room: "—",
-    bed_number: "—",
+    room: null,
+    bed_number: null,
   },
 };
 

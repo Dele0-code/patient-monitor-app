@@ -1,55 +1,48 @@
 import { useEffect, useRef } from "react";
 
-const TRACE_COLOR = "#39ff14";
-const GRID_FINE = "rgba(57, 255, 20, 0.08)";
-const GRID_BOLD = "rgba(57, 255, 20, 0.18)";
-const BG_COLOR = "#020a02";
+/** Clinical monitor green — Philips/GE style, not neon */
+const TRACE_COLOR = "#00e676";
+const GRID_FINE = "rgba(0, 180, 80, 0.12)";
+const GRID_BOLD = "rgba(0, 180, 80, 0.28)";
+const BG_COLOR = "#000000";
+const ERASE_GAP = 18;
 
 function drawGrid(ctx, width, height) {
   ctx.fillStyle = BG_COLOR;
   ctx.fillRect(0, 0, width, height);
 
-  const fineStep = 10;
-  const boldStep = 50;
+  const fineStep = 8;
+  const boldStep = 40;
 
   ctx.strokeStyle = GRID_FINE;
   ctx.lineWidth = 1;
   for (let x = 0; x <= width; x += fineStep) {
     ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, height);
     ctx.stroke();
   }
   for (let y = 0; y <= height; y += fineStep) {
     ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(width, y + 0.5);
     ctx.stroke();
   }
 
   ctx.strokeStyle = GRID_BOLD;
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1;
   for (let x = 0; x <= width; x += boldStep) {
     ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, height);
     ctx.stroke();
   }
   for (let y = 0; y <= height; y += boldStep) {
     ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(width, y + 0.5);
     ctx.stroke();
   }
-}
-
-function drawBaseline(ctx, width, height, baselineY) {
-  ctx.strokeStyle = "rgba(57, 255, 20, 0.35)";
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(0, baselineY);
-  ctx.lineTo(width, baselineY);
-  ctx.stroke();
 }
 
 function normalizeSamples(samples) {
@@ -95,32 +88,67 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
       width = rect.width;
       height = rect.height;
       if (!width || !height) return false;
-      baselineY = height * 0.55;
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
+      baselineY = height * 0.52;
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       drawGrid(ctx, width, height);
-      drawBaseline(ctx, width, height, baselineY);
       lastYRef.current = baselineY;
       sweepXRef.current = 0;
       return true;
     };
 
+    const eraseAhead = (x) => {
+      const eraseX = x;
+      ctx.fillStyle = BG_COLOR;
+      ctx.fillRect(eraseX, 0, ERASE_GAP, height);
+
+      // Redraw grid only in erase band
+      const fineStep = 8;
+      const boldStep = 40;
+      ctx.strokeStyle = GRID_FINE;
+      ctx.lineWidth = 1;
+      for (let gx = Math.floor(eraseX / fineStep) * fineStep; gx <= eraseX + ERASE_GAP; gx += fineStep) {
+        if (gx < 0) continue;
+        ctx.beginPath();
+        ctx.moveTo(gx + 0.5, 0);
+        ctx.lineTo(gx + 0.5, height);
+        ctx.stroke();
+      }
+      for (let gy = 0; gy <= height; gy += fineStep) {
+        ctx.beginPath();
+        ctx.moveTo(eraseX, gy + 0.5);
+        ctx.lineTo(eraseX + ERASE_GAP, gy + 0.5);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = GRID_BOLD;
+      for (let gx = Math.floor(eraseX / boldStep) * boldStep; gx <= eraseX + ERASE_GAP; gx += boldStep) {
+        if (gx < 0) continue;
+        ctx.beginPath();
+        ctx.moveTo(gx + 0.5, 0);
+        ctx.lineTo(gx + 0.5, height);
+        ctx.stroke();
+      }
+      for (let gy = 0; gy <= height; gy += boldStep) {
+        ctx.beginPath();
+        ctx.moveTo(eraseX, gy + 0.5);
+        ctx.lineTo(eraseX + ERASE_GAP, gy + 0.5);
+        ctx.stroke();
+      }
+    };
+
     const drawSegment = (x1, y1, x2, y2) => {
+      eraseAhead(x2);
+
       ctx.strokeStyle = TRACE_COLOR;
-      ctx.lineWidth = 2.5;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.shadowBlur = 6;
-      ctx.shadowColor = TRACE_COLOR;
+      ctx.lineWidth = 2;
+      ctx.lineCap = "butt";
+      ctx.lineJoin = "miter";
+      ctx.shadowBlur = 0;
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
       ctx.stroke();
-      ctx.shadowBlur = 0;
-
-      ctx.fillStyle = BG_COLOR;
-      ctx.fillRect(x2, 0, 3, height);
     };
 
     const render = (time) => {
@@ -134,26 +162,26 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
 
       if (!hasSignal) {
         drawGrid(ctx, width, height);
-        drawBaseline(ctx, width, height, baselineY);
         sampleQueueRef.current = [];
         sweepXRef.current = 0;
         lastYRef.current = baselineY;
       } else {
-        const samplesPerSecond = 100;
-        const pixelsPerSample = 1.8;
+        // ~25 mm/s visual sweep rate on typical display width
+        const samplesPerSecond = 120;
+        const pixelsPerSample = 2;
         const samplesToDraw = Math.max(1, Math.floor(dt * samplesPerSecond));
 
         for (let i = 0; i < samplesToDraw; i += 1) {
           const sample = sampleQueueRef.current.shift();
           if (sample === undefined) break;
 
-          const nextX = (sweepXRef.current + pixelsPerSample) % width;
-          const nextY = baselineY - sample * (height * 0.38);
+          const nextX = sweepXRef.current + pixelsPerSample;
+          const nextY = baselineY - sample * (height * 0.36);
 
-          if (nextX < sweepXRef.current) {
-            drawGrid(ctx, width, height);
-            drawBaseline(ctx, width, height, baselineY);
-            lastYRef.current = baselineY;
+          if (nextX >= width) {
+            sweepXRef.current = 0;
+            lastYRef.current = nextY;
+            continue;
           }
 
           drawSegment(sweepXRef.current, lastYRef.current, nextX, nextY);
@@ -184,20 +212,19 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
   }, [hasSignal]);
 
   return (
-    <div className={`relative overflow-hidden rounded-lg border border-emerald-950/50 ecg-grid ${className}`}>
+    <div className={`relative overflow-hidden bg-black ${className}`}>
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
-      <div className="pointer-events-none absolute left-3 top-3 rounded border border-emerald-900/30 bg-black/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-        Lead I
+      <div className="pointer-events-none absolute left-2 top-1.5 flex items-baseline gap-3">
+        <span className="text-[11px] font-bold tracking-wider text-emerald-400">ECG II</span>
+        <span className="text-[10px] tracking-wider text-emerald-700">x1</span>
       </div>
-      <div className="pointer-events-none absolute right-3 top-3 text-right">
-        <div className="text-[9px] font-bold uppercase tracking-wider text-emerald-600">Gain 10 mm/mV</div>
-        <div className="text-[9px] font-bold uppercase tracking-wider text-emerald-600">25 mm/s</div>
+      <div className="pointer-events-none absolute right-2 top-1.5 text-right text-[10px] leading-tight tracking-wider text-emerald-700">
+        <div>25 mm/s</div>
+        <div>10 mm/mV</div>
       </div>
       {!hasSignal && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <span className="rounded border border-slate-700 bg-black/70 px-4 py-2 text-sm font-bold uppercase tracking-widest text-slate-400">
-            No Signal
-          </span>
+          <span className="text-sm font-bold uppercase tracking-[0.25em] text-slate-500">No Signal</span>
         </div>
       )}
     </div>
