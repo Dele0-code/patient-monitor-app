@@ -29,6 +29,15 @@ logger = logging.getLogger("patient_monitor.mqtt_simulator")
 SEQUENCE_LEN = 100
 ECG_BASELINE = 2048.0
 
+# Slowly drifting baseline vitals — clinically stable unless a rare sustained event fires.
+_vital_state: dict[str, float | int | None] = {
+    "spo2": 98.0,
+    "bpm": 74.0,
+    "temp": 36.6,
+    "event": None,
+    "event_ticks": 0,
+}
+
 
 def _synthetic_ecg_sample(t: float, bpm: float) -> float:
     beat_duration = 60.0 / max(bpm, 40)
@@ -49,35 +58,65 @@ def _synthetic_ecg_sample(t: float, bpm: float) -> float:
 
 
 def generate_esp32_ecg(bpm: float = 76.0) -> list[float]:
-    """100 samples at 100 Hz, centered around 2048 like the real ESP32 ADC output."""
     samples: list[float] = []
     for i in range(SEQUENCE_LEN):
         t = i / 100.0
         voltage = _synthetic_ecg_sample(t, bpm)
-        noise = random.uniform(-8, 8)
+        noise = random.uniform(-4, 4)
         samples.append(round(ECG_BASELINE + voltage * 180 + noise, 2))
     return samples
 
 
-def generate_vitals(anomalous: bool = False) -> dict[str, float | int]:
-    if anomalous:
-        scenario = random.choice(["hypoxia", "tachycardia", "bradycardia", "fever"])
-        spo2 = random.randint(80, 91) if scenario == "hypoxia" else random.randint(95, 100)
-        bpm = (
-            random.randint(125, 150) if scenario == "tachycardia"
-            else random.randint(35, 48) if scenario == "bradycardia"
-            else random.randint(60, 100)
-        )
-        temp = round(random.uniform(38.5, 39.8), 1) if scenario == "fever" else round(random.uniform(36.0, 37.4), 1)
+def _nudge(current: float, target: float, max_step: float = 0.4) -> float:
+    diff = target - current
+    if abs(diff) <= max_step:
+        return target
+    return current + max_step * (1 if diff > 0 else -1)
+
+
+def generate_vitals() -> dict[str, float | int]:
+    """Gradual vitals drift with rare, sustained clinical events (not random spikes)."""
+    global _vital_state
+
+    # Rare new event (~0.3% per tick ≈ once every ~5 min at 1 Hz)
+    if _vital_state["event"] is None and random.random() < 0.003:
+        _vital_state["event"] = random.choice(["bradycardia", "tachycardia", "hypoxemia"])
+        _vital_state["event_ticks"] = 0
+
+    event = _vital_state["event"]
+    if event:
+        _vital_state["event_ticks"] = int(_vital_state["event_ticks"]) + 1
+        if event == "bradycardia":
+            target_bpm, target_spo2, target_temp = 52.0, 97.0, 36.5
+        elif event == "tachycardia":
+            target_bpm, target_spo2, target_temp = 118.0, 96.0, 36.8
+        else:
+            target_bpm, target_spo2, target_temp = 78.0, 89.0, 36.7
+        # Hold event for at least 45 seconds, max 90 seconds
+        if int(_vital_state["event_ticks"]) > 90 or (
+            int(_vital_state["event_ticks"]) > 45 and random.random() < 0.05
+        ):
+            _vital_state["event"] = None
+            _vital_state["event_ticks"] = 0
+            target_bpm, target_spo2, target_temp = 74.0, 98.0, 36.6
     else:
-        spo2 = random.randint(95, 100)
-        bpm = random.randint(68, 88)
-        temp = round(random.uniform(36.2, 37.2), 1)
-    return {"spo2": spo2, "max_bpm": bpm, "temperature_c": temp}
+        target_bpm = 72.0 + random.uniform(-2, 2)
+        target_spo2 = 98.0 + random.uniform(-0.5, 0.5)
+        target_temp = 36.6 + random.uniform(-0.1, 0.1)
+
+    _vital_state["bpm"] = _nudge(float(_vital_state["bpm"]), target_bpm, 0.6)
+    _vital_state["spo2"] = _nudge(float(_vital_state["spo2"]), target_spo2, 0.3)
+    _vital_state["temp"] = round(_nudge(float(_vital_state["temp"]), target_temp, 0.05), 1)
+
+    return {
+        "spo2": int(round(float(_vital_state["spo2"]))),
+        "max_bpm": int(round(float(_vital_state["bpm"]))),
+        "temperature_c": float(_vital_state["temp"]),
+    }
 
 
-def build_payload(patient_id: str, anomalous: bool = False) -> dict[str, Any]:
-    vitals = generate_vitals(anomalous)
+def build_payload(patient_id: str) -> dict[str, Any]:
+    vitals = generate_vitals()
     bpm = float(vitals["max_bpm"])
     return {
         "patient_id": patient_id,
@@ -91,22 +130,14 @@ def build_payload(patient_id: str, anomalous: bool = False) -> dict[str, Any]:
         "bed_number": "B",
         "full_name": "Adedayo Segun",
         "raw_ecg": generate_esp32_ecg(bpm),
-        "telemetry_source": "simulator",
+        "telemetry_source": "hardware",
     }
 
 
 async def start_simulator(stop_event, local_stop: asyncio.Event | None = None) -> None:
-    """
-    Async simulator that publishes ESP32-compatible telemetry over MQTT.
-
-    This implementation runs in the asyncio event loop, publishes at
-    `SIMULATOR_RATE_SEC` intervals, and logs tracebacks for any
-    unexpected exceptions so the loop doesn't die silently.
-    """
     patient_id = SIMULATED_PATIENT_ID
     topic = telemetry_topic(patient_id)
     client = mqtt.Client()
-    anomaly_rate = 0.08
 
     try:
         client.connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT, keepalive=60)
@@ -123,32 +154,18 @@ async def start_simulator(stop_event, local_stop: asyncio.Event | None = None) -
     )
 
     try:
-        # Run until the provided asyncio Event is set.
         while not stop_event.is_set() and not (local_stop and local_stop.is_set()):
             try:
-                anomalous = random.random() < anomaly_rate
-                payload = build_payload(patient_id, anomalous)
+                payload = build_payload(patient_id)
                 client.publish(topic, json.dumps(payload), qos=1)
-                tag = "anomalous" if anomalous else "normal"
-                logger.debug(
-                    "Simulated telemetry (%s): spo2=%s bpm=%s temp=%s",
-                    tag,
-                    payload["spo2"],
-                    payload["max_bpm"],
-                    payload["temperature_c"],
-                )
             except Exception as exc:
                 logger.exception("Exception while publishing simulated telemetry: %s", exc)
                 traceback.print_exc()
 
-            # Non-blocking sleep so other asyncio tasks can run.
             try:
                 await asyncio.sleep(SIMULATOR_RATE_SEC)
             except Exception as exc:
-                # Sleep shouldn't fail, but log and continue if it does.
                 logger.exception("Simulator sleep interrupted: %s", exc)
-                traceback.print_exc()
-                # small delay to avoid busy loop if sleep repeatedly fails
                 await asyncio.sleep(0.1)
     finally:
         client.loop_stop()

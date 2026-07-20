@@ -8,7 +8,6 @@ import ollama
 import paho.mqtt.client as mqtt
 
 import db
-import db
 import ws_manager
 from config import (
     ECG_SEQUENCE_LEN,
@@ -24,7 +23,9 @@ from state import patient_history
 
 logger = logging.getLogger("patient_monitor.mqtt")
 
-LLM_THROTTLE_SEC = 12.0
+LLM_THROTTLE_SEC = 45.0
+SEVERITY_ESCALATE_TICKS = 8
+SEVERITY_DEESCALATE_TICKS = 25
 
 ollama_client = ollama.Client(host=OLLAMA_HOST, timeout=15)
 
@@ -32,6 +33,8 @@ _last_rule_severity: dict[str, str] = {}
 _last_llm_assessment: dict[str, dict[str, Any]] = {}
 _last_llm_call_time: dict[str, float] = {}
 _last_real_telemetry_at: float | None = None
+_severity_streak: dict[str, dict[str, Any]] = {}
+_vitals_flag_streak: dict[str, dict[str, Any]] = {}
 
 
 def note_real_telemetry() -> None:
@@ -57,15 +60,50 @@ def _normalize_ecg_window(raw_ecg: list[float]) -> list[float] | None:
 
 
 def _determine_vitals_flag(spo2: float, bpm: float, temp: float) -> str:
-    if 0 < spo2 < 92:
-        return "Warning: Hypoxia Detected"
+    if 0 < spo2 < 90:
+        return "Hypoxemia"
     if bpm > 120:
-        return "Warning: Tachycardia Detected"
+        return "Tachycardia"
     if bpm < 50:
-        return "Warning: Bradycardia Detected"
-    if temp >= 39.0:
-        return "Warning: Fever Detected"
+        return "Bradycardia"
+    if temp >= 38.5:
+        return "Pyrexia"
     return "Stable"
+
+
+def _stabilize_vitals_flag(patient_id: str, instant: str) -> str:
+    streak = _vitals_flag_streak.setdefault(
+        patient_id, {"active": "Stable", "pending": "Stable", "count": 0}
+    )
+    if instant == streak["pending"]:
+        streak["count"] += 1
+    else:
+        streak["pending"] = instant
+        streak["count"] = 1
+
+    threshold = 6 if instant != "Stable" else 15
+    if streak["count"] >= threshold:
+        streak["active"] = instant
+    return streak["active"]
+
+
+def _stabilize_severity(patient_id: str, instant: str) -> str:
+    rank = {"stable": 0, "watch": 1, "critical": 2}
+    streak = _severity_streak.setdefault(
+        patient_id, {"level": "stable", "pending": "stable", "count": 0}
+    )
+    if instant == streak["pending"]:
+        streak["count"] += 1
+    else:
+        streak["pending"] = instant
+        streak["count"] = 1
+
+    current = streak["level"]
+    escalating = rank[instant] > rank[current]
+    threshold = SEVERITY_ESCALATE_TICKS if escalating else SEVERITY_DEESCALATE_TICKS
+    if streak["count"] >= threshold:
+        streak["level"] = instant
+    return streak["level"]
 
 
 def _determine_severity(spo2: float, bpm: float, temp: float, rhythm_anomaly: bool) -> str:
@@ -205,7 +243,8 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
     patient_meta = db.get_patient(patient_id) or {}
     full_name = patient_meta.get("full_name") or patient_id
 
-    vitals_flag = _determine_vitals_flag(spo2, bpm, temp)
+    instant_flag = _determine_vitals_flag(spo2, bpm, temp)
+    vitals_flag = _stabilize_vitals_flag(patient_id, instant_flag)
     raw_ecg_array = _normalize_ecg_window(raw_ecg)
     rhythm_status = "Signal Incomplete (Check Leads)"
     rhythm_anomaly = False
@@ -277,7 +316,8 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
     )
 
     prompt = _build_prompt(patient_id, spo2, bpm, temp, rhythm_status, vitals_flag)
-    rule_severity = _determine_severity(spo2, bpm, temp, rhythm_anomaly)
+    instant_severity = _determine_severity(spo2, bpm, temp, rhythm_anomaly)
+    rule_severity = _stabilize_severity(patient_id, instant_severity)
     previous_rule_severity = _last_rule_severity.get(patient_id)
     severity_changed = previous_rule_severity is not None and rule_severity != previous_rule_severity
     now = time.monotonic()

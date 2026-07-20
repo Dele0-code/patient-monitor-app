@@ -10,10 +10,10 @@ MQTT_TOPIC_PREFIX = os.environ.get("MQTT_TOPIC_PREFIX", "patient-monitor")
 
 SIMULATE_ESP32 = os.environ.get("SIMULATE_ESP32", "false").lower() in ("1", "true", "yes")
 SIMULATED_PATIENT_ID = os.environ.get("SIMULATED_PATIENT_ID", "PT-000001")
-SIMULATOR_RATE_SEC = float(os.environ.get("SIMULATOR_RATE_SEC", "1.0"))
+SIMULATOR_RATE_SEC = float(os.environ.get("SIMULATOR_RATE_SEC", "2.0"))
 
 # When no real ESP32 data arrives, auto-publish changing dummy vitals for UI testing.
-AUTO_SIMULATE_WHEN_IDLE = os.environ.get("AUTO_SIMULATE_WHEN_IDLE", "true").lower() in ("1", "true", "yes")
+AUTO_SIMULATE_WHEN_IDLE = os.environ.get("AUTO_SIMULATE_WHEN_IDLE", "false").lower() in ("1", "true", "yes")
 IDLE_SIMULATOR_SEC = float(os.environ.get("IDLE_SIMULATOR_SEC", "8"))
 
 USE_LLM = os.environ.get("USE_LLM", "true").lower() in ("1", "true", "yes")

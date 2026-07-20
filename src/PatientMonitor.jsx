@@ -3,37 +3,17 @@ import EcgWaveform from "./components/EcgWaveform.jsx";
 import AlarmBanner from "./components/AlarmBanner.jsx";
 import ConnectionBadge from "./components/ConnectionBadge.jsx";
 import ClinicalAssessment from "./components/ClinicalAssessment.jsx";
+import VitalGauge from "./components/VitalGauge.jsx";
+import { useTheme } from "./context/ThemeContext.jsx";
 import { getPatient } from "./patients.js";
 
 const NO_SIGNAL = "— — —";
 
-function VitalBlock({ label, value, unit, alert, color = "text-emerald-400", large = false }) {
-  const hasValue = value !== null && value !== undefined && value !== NO_SIGNAL;
-
-  return (
-    <div
-      className={`flex flex-col justify-between border-b border-slate-800 px-3 py-2 ${
-        alert ? "animate-pulse bg-red-950/40" : ""
-      }`}
-    >
-      <div className="flex items-baseline justify-between gap-2">
-        <span className={`text-[11px] font-bold uppercase tracking-widest ${alert ? "text-red-400" : "text-slate-500"}`}>
-          {label}
-        </span>
-        {unit && hasValue && (
-          <span className={`text-[10px] font-semibold uppercase ${alert ? "text-red-400" : color}`}>{unit}</span>
-        )}
-      </div>
-      <div className={`mt-0.5 font-bold leading-none tracking-tight ${alert ? "text-red-400" : color} ${large ? "text-6xl" : "text-4xl"}`}>
-        {hasValue ? value : <span className="text-2xl tracking-widest text-slate-600">{NO_SIGNAL}</span>}
-      </div>
-    </div>
-  );
-}
-
 export default function PatientMonitor({ patientId, liveEvent, connectionStatus }) {
+  const { theme, toggleTheme } = useTheme();
   const patientMeta = getPatient(patientId);
   const hasData = liveEvent != null && connectionStatus !== "offline";
+  const isLiveFeed = connectionStatus === "live";
 
   const [heartRate, setHeartRate] = useState(null);
   const [spo2, setSpo2] = useState(null);
@@ -46,7 +26,6 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
   const [severityTag, setSeverityTag] = useState(null);
   const [confidence, setConfidence] = useState(null);
   const [assessmentSource, setAssessmentSource] = useState(null);
-  const [telemetrySource, setTelemetrySource] = useState(null);
   const [systemFlags, setSystemFlags] = useState(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -54,6 +33,14 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
 
   const audioCtxRef = useRef(null);
   const audioEnabledRef = useRef(audioEnabled);
+
+  const isDark = theme === "dark";
+  const shell = isDark ? "bg-black text-slate-100" : "bg-slate-100 text-slate-900";
+  const headerBg = isDark ? "bg-[#0a0a0a] border-slate-800" : "bg-white border-slate-200";
+  const asideBg = isDark ? "bg-[#050505]" : "bg-white";
+  const borderColor = isDark ? "border-slate-800" : "border-slate-200";
+  const labelMuted = isDark ? "text-slate-600" : "text-slate-500";
+  const accent = isDark ? "text-emerald-400" : "text-emerald-600";
 
   useEffect(() => {
     audioEnabledRef.current = audioEnabled;
@@ -78,7 +65,6 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
       setSeverityTag(null);
       setConfidence(null);
       setAssessmentSource(null);
-      setTelemetrySource(null);
       setSystemFlags(null);
       setRawEcg(null);
       return;
@@ -90,25 +76,20 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
     setNibpSys(liveEvent.nibp_sys ?? null);
     setNibpDia(liveEvent.nibp_dia ?? null);
     setArrhythmia(liveEvent.rhythm_status ?? null);
-    setSummaryText(liveEvent.summary ?? null);
-    setRecommendedAction(liveEvent.recommended_action ?? null);
-    setSeverityTag(liveEvent.severity ?? null);
-    setConfidence(liveEvent.confidence ?? null);
-    setAssessmentSource(liveEvent.assessment_source ?? null);
-    setTelemetrySource(liveEvent.telemetry_source ?? null);
-    setSystemFlags(liveEvent.system_flags ?? null);
-    if (liveEvent.raw_ecg?.length) {
-      setRawEcg(liveEvent.raw_ecg);
-    }
+    if (liveEvent.summary) setSummaryText(liveEvent.summary);
+    if (liveEvent.recommended_action) setRecommendedAction(liveEvent.recommended_action);
+    if (liveEvent.severity) setSeverityTag(liveEvent.severity);
+    if (liveEvent.confidence != null) setConfidence(liveEvent.confidence);
+    if (liveEvent.assessment_source) setAssessmentSource(liveEvent.assessment_source);
+    if (liveEvent.system_flags) setSystemFlags(liveEvent.system_flags);
+    if (liveEvent.raw_ecg?.length) setRawEcg(liveEvent.raw_ecg);
   }, [connectionStatus, liveEvent]);
 
   const triggerBeep = useCallback((freq, duration, volume = 0.05) => {
     if (!audioEnabledRef.current) return;
     try {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
-      if (!audioCtxRef.current && AudioContext) {
-        audioCtxRef.current = new AudioContext();
-      }
+      if (!audioCtxRef.current && AudioContext) audioCtxRef.current = new AudioContext();
       const ctx = audioCtxRef.current;
       if (!ctx || ctx.state === "suspended") return;
       const osc = ctx.createOscillator();
@@ -122,7 +103,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
       osc.start();
       osc.stop(ctx.currentTime + duration);
     } catch {
-      // Audio unavailable on some kiosk setups
+      // Audio unavailable on kiosk
     }
   }, []);
 
@@ -131,65 +112,63 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
     const interval = setInterval(() => {
       triggerBeep(880, 0.1, 0.08);
       setTimeout(() => triggerBeep(880, 0.1, 0.08), 150);
-    }, 1000);
+    }, 2000);
     return () => clearInterval(interval);
   }, [hasData, severityTag, triggerBeep]);
 
-  const hrAlert = hasData && heartRate != null && (heartRate > 100 || heartRate < 55);
-  const spo2Alert = hasData && spo2 != null && spo2 < 95;
-  const tempAlert = hasData && temp != null && (temp > 37.8 || temp < 35.8);
+  const hrAlert = hasData && heartRate != null && (heartRate > 110 || heartRate < 52);
+  const spo2Alert = hasData && spo2 != null && spo2 < 92;
+  const tempAlert = hasData && temp != null && (temp > 38.0 || temp < 35.5);
   const nibpAlert =
-    hasData &&
-    nibpSys != null &&
-    nibpDia != null &&
-    (nibpSys > 140 || nibpSys < 90 || nibpDia > 90 || nibpDia < 55);
+    hasData && nibpSys != null && nibpDia != null && (nibpSys > 140 || nibpSys < 90 || nibpDia > 90 || nibpDia < 55);
 
-  const nibpDisplay =
-    !hasData || nibpSys == null || nibpDia == null ? NO_SIGNAL : `${nibpSys}/${nibpDia}`;
+  const nibpGaugeValue = hasData && nibpSys != null ? nibpSys : null;
+  const nibpDisplay = !hasData || nibpSys == null || nibpDia == null ? null : `${nibpSys}/${nibpDia}`;
 
   const displayName = liveEvent?.full_name || patientMeta?.full_name || "Adedayo Segun";
   const room = liveEvent?.room || patientMeta?.room;
   const bed = liveEvent?.bed_number || patientMeta?.bed_number;
   const location =
-    room && room !== "—" && bed && bed !== "—"
-      ? `${room} / ${bed}`
-      : patientMeta?.ward || "Bedside";
-
-  const isDemoData = hasData && telemetrySource === "simulator";
-  const isLiveFeed = connectionStatus === "live";
+    room && room !== "—" && bed && bed !== "—" ? `${room} / ${bed}` : patientMeta?.ward || "ICU";
 
   return (
-    <div className="flex h-full flex-col bg-black font-mono text-slate-100">
+    <div className={`flex h-full flex-col font-mono ${shell}`}>
       <AlarmBanner severity={hasData ? severityTag : null} systemFlags={systemFlags} />
-      {isDemoData && (
-        <div className="bg-amber-600 px-3 py-1 text-center text-[10px] font-bold uppercase tracking-[0.2em] text-black">
-          Demo mode — ESP32 not connected · simulated vitals updating every second
-        </div>
-      )}
 
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-800 bg-[#0a0a0a] px-3 py-1.5">
+      <header className={`flex shrink-0 items-center justify-between gap-4 border-b px-3 py-1.5 ${headerBg}`}>
         <div className="flex min-w-0 items-center gap-4">
           <div className="min-w-0">
-            <div className="text-[9px] uppercase tracking-widest text-slate-600">Patient</div>
-            <div className="truncate text-lg font-bold text-emerald-400">{displayName}</div>
+            <div className={`text-[9px] uppercase tracking-widest ${labelMuted}`}>Patient</div>
+            <div className={`truncate text-lg font-bold ${accent}`}>{displayName}</div>
           </div>
           <div className="hidden shrink-0 sm:block">
-            <div className="text-[9px] uppercase tracking-widest text-slate-600">ID</div>
-            <div className="text-sm font-bold text-slate-400">{patientId}</div>
+            <div className={`text-[9px] uppercase tracking-widest ${labelMuted}`}>ID</div>
+            <div className={`text-sm font-bold ${isDark ? "text-slate-400" : "text-slate-600"}`}>{patientId}</div>
           </div>
           <div className="hidden shrink-0 md:block">
-            <div className="text-[9px] uppercase tracking-widest text-slate-600">Location</div>
-            <div className="text-sm font-bold text-slate-300">{location}</div>
+            <div className={`text-[9px] uppercase tracking-widest ${labelMuted}`}>Location</div>
+            <div className={`text-sm font-bold ${isDark ? "text-slate-300" : "text-slate-700"}`}>{location}</div>
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-5">
-          <ConnectionBadge status={isLiveFeed ? connectionStatus : "connecting"} demoMode={isDemoData} />
+        <div className="flex shrink-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className={`border px-2 py-1 text-[10px] font-bold uppercase tracking-widest ${
+              isDark
+                ? "border-slate-700 text-slate-400 hover:border-slate-500"
+                : "border-slate-300 text-slate-600 hover:border-slate-400"
+            }`}
+          >
+            {isDark ? "Light" : "Dark"}
+          </button>
+          <ConnectionBadge status={isLiveFeed ? connectionStatus : "connecting"} />
           <div className="text-right">
-            <div className="text-lg font-bold tabular-nums tracking-wider text-emerald-400">
+            <div className={`text-lg font-bold tabular-nums tracking-wider ${accent}`}>
               {currentTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
             </div>
-            <div className="text-[10px] tabular-nums text-slate-500">
+            <div className={`text-[10px] tabular-nums ${labelMuted}`}>
               {currentTime.toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" })}
             </div>
           </div>
@@ -197,8 +176,8 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
       </header>
 
       <main className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <section className="flex min-h-0 min-w-0 flex-[3] flex-col border-b border-slate-800 lg:border-b-0 lg:border-r">
-          <EcgWaveform rawEcg={rawEcg} hasSignal={hasData} className="min-h-[180px] flex-1" />
+        <section className={`flex min-h-0 min-w-0 flex-[3] flex-col border-b lg:border-b-0 lg:border-r ${borderColor}`}>
+          <EcgWaveform rawEcg={rawEcg} hasSignal={hasData} theme={theme} className="min-h-[180px] flex-1" />
 
           <ClinicalAssessment
             hasData={hasData}
@@ -209,45 +188,65 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
             summary={summaryText}
             recommendedAction={recommendedAction}
             assessmentSource={assessmentSource}
+            theme={theme}
           />
         </section>
 
-        <aside className="flex w-full shrink-0 flex-col bg-[#050505] lg:w-56 xl:w-64">
-          <VitalBlock
+        <aside className={`grid w-full shrink-0 grid-cols-2 gap-0 lg:flex lg:w-52 lg:flex-col xl:w-60 ${asideBg}`}>
+          <VitalGauge
             label="HR"
-            value={hasData ? heartRate : NO_SIGNAL}
+            value={hasData ? heartRate : null}
+            displayValue={hasData ? heartRate : null}
             unit="bpm"
+            min={40}
+            max={160}
             alert={hrAlert}
-            color="text-emerald-400"
-            large
+            strokeColor="#34d399"
+            theme={theme}
           />
-          <VitalBlock
+          <VitalGauge
             label="SpO₂"
-            value={hasData ? spo2 : NO_SIGNAL}
+            value={hasData ? spo2 : null}
+            displayValue={hasData ? spo2 : null}
             unit="%"
+            min={80}
+            max={100}
             alert={spo2Alert}
-            color="text-sky-400"
+            strokeColor="#38bdf8"
+            theme={theme}
           />
-          <VitalBlock
+          <VitalGauge
             label="NIBP"
-            value={nibpDisplay}
+            value={nibpGaugeValue}
+            displayValue={nibpDisplay}
             unit="mmHg"
+            min={60}
+            max={180}
             alert={nibpAlert}
-            color="text-rose-300"
+            strokeColor="#f9a8d4"
+            theme={theme}
           />
-          <VitalBlock
+          <VitalGauge
             label="TEMP"
-            value={hasData && temp != null ? temp.toFixed(1) : NO_SIGNAL}
+            value={hasData && temp != null ? temp : null}
+            displayValue={hasData && temp != null ? temp.toFixed(1) : null}
             unit="°C"
+            min={35}
+            max={40}
             alert={tempAlert}
-            color="text-amber-300"
+            strokeColor="#fcd34d"
+            theme={theme}
           />
 
-          <div className="mt-auto border-t border-slate-800 p-2">
+          <div className={`col-span-2 mt-auto border-t p-2 lg:col-span-1 ${borderColor}`}>
             <button
               type="button"
               onClick={() => setAudioEnabled((v) => !v)}
-              className="w-full border border-slate-700 bg-black px-2 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:border-slate-500 hover:text-slate-200"
+              className={`w-full border px-2 py-2 text-[10px] font-bold uppercase tracking-widest ${
+                isDark
+                  ? "border-slate-700 bg-black text-slate-400 hover:border-slate-500"
+                  : "border-slate-300 bg-slate-50 text-slate-600 hover:border-slate-400"
+              }`}
             >
               {audioEnabled ? "Mute Alarms" : "Alarms Muted"}
             </button>

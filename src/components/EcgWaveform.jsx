@@ -160,7 +160,7 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
         lastYRef.current = baselineY;
       } else {
         // Match ~100 incoming samples/sec (1 MQTT packet/sec with 100 points)
-        const samplesPerSecond = 45;
+        const samplesPerSecond = 28;
         const pixelsPerSample = Math.max(1.5, width / 250);
         const samplesToDraw = Math.max(1, Math.floor(dt * samplesPerSecond));
 

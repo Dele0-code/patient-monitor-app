@@ -9,7 +9,14 @@ body,
   width: 100%;
   margin: 0;
   overflow: hidden;
+}
+
+html.dark body {
   background: #000;
+}
+
+html.light body {
+  background: #f1f5f9;
 }
 
 body {
@@ -18,17 +25,4 @@ body {
   -webkit-user-select: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.animate-fade-in {
-  animation: fadeIn 0.2s ease-out forwards;
 }
