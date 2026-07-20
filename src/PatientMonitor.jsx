@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import EcgWaveform from "./components/EcgWaveform.jsx";
 import AlarmBanner from "./components/AlarmBanner.jsx";
+import AlertDetailPanel from "./components/AlertDetailPanel.jsx";
 import ConnectionBadge from "./components/ConnectionBadge.jsx";
 import ClinicalAssessment from "./components/ClinicalAssessment.jsx";
 import VitalGauge from "./components/VitalGauge.jsx";
@@ -8,6 +9,7 @@ import { useTheme } from "./context/ThemeContext.jsx";
 import { getPatient } from "./patients.js";
 
 const NO_SIGNAL = "— — —";
+const ALERT_HOLD_MS = 60000;
 
 export default function PatientMonitor({ patientId, liveEvent, connectionStatus }) {
   const { theme, toggleTheme } = useTheme();
@@ -30,6 +32,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [rawEcg, setRawEcg] = useState(null);
+  const [latchedAlert, setLatchedAlert] = useState(null);
 
   const audioCtxRef = useRef(null);
   const audioEnabledRef = useRef(audioEnabled);
@@ -109,18 +112,86 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
 
   useEffect(() => {
     if (!hasData || severityTag !== "critical") return undefined;
+    const activeSeverity = latchedAlert?.severity === "critical" ? "critical" : severityTag;
+    if (activeSeverity !== "critical") return undefined;
     const interval = setInterval(() => {
       triggerBeep(880, 0.1, 0.08);
       setTimeout(() => triggerBeep(880, 0.1, 0.08), 150);
     }, 2000);
     return () => clearInterval(interval);
-  }, [hasData, severityTag, triggerBeep]);
+  }, [hasData, severityTag, latchedAlert, triggerBeep]);
 
-  const hrAlert = hasData && heartRate != null && (heartRate > 110 || heartRate < 52);
-  const spo2Alert = hasData && spo2 != null && spo2 < 92;
-  const tempAlert = hasData && temp != null && (temp > 38.0 || temp < 35.5);
-  const nibpAlert =
+  const hrAlertInstant = hasData && heartRate != null && (heartRate > 110 || heartRate < 52);
+  const spo2AlertInstant = hasData && spo2 != null && spo2 < 92;
+  const tempAlertInstant = hasData && temp != null && (temp > 38.0 || temp < 35.5);
+  const nibpAlertInstant =
     hasData && nibpSys != null && nibpDia != null && (nibpSys > 140 || nibpSys < 90 || nibpDia > 90 || nibpDia < 55);
+  const rhythmAlertInstant =
+    hasData && arrhythmia && !String(arrhythmia).toLowerCase().includes("normal");
+
+  useEffect(() => {
+    if (!hasData) return;
+
+    const messages = [];
+    if (heartRate != null && heartRate > 110) messages.push(`Tachycardia — HR ${heartRate} bpm`);
+    else if (heartRate != null && heartRate < 52) messages.push(`Bradycardia — HR ${heartRate} bpm`);
+    if (spo2 != null && spo2 < 92) messages.push(`Hypoxemia — SpO₂ ${spo2}%`);
+    if (temp != null && temp > 38.0) messages.push(`Pyrexia — ${temp.toFixed(1)}°C`);
+    else if (temp != null && temp < 35.5) messages.push(`Hypothermia — ${temp.toFixed(1)}°C`);
+    if (rhythmAlertInstant) messages.push(String(arrhythmia));
+    if (systemFlags && systemFlags !== "Stable" && !messages.some((m) => m.includes(systemFlags))) {
+      messages.push(systemFlags);
+    }
+
+    const hasIssue = messages.length > 0 || severityTag === "watch" || severityTag === "critical";
+    if (!hasIssue) return;
+
+    const now = Date.now();
+    const severity =
+      severityTag === "critical" ? "critical" : severityTag === "watch" || messages.length ? "watch" : "stable";
+
+    setLatchedAlert((prev) => {
+      const rank = { stable: 0, watch: 1, critical: 2 };
+      const shouldReplace =
+        !prev ||
+        rank[severity] > rank[prev.severity] ||
+        messages.join("|") !== prev.messages.join("|");
+
+      if (!shouldReplace) return prev;
+
+      return {
+        severity,
+        messages:
+          messages.length > 0
+            ? messages
+            : [severityTag === "critical" ? "Critical vital signs detected" : "Clinical watch — review patient"],
+        detail: `HR ${heartRate ?? "—"} bpm · SpO₂ ${spo2 ?? "—"}% · Temp ${temp != null ? temp.toFixed(1) : "—"}°C`,
+        flaggedAt: new Date(),
+        expiresAt: new Date(now + ALERT_HOLD_MS),
+        expiresAtMs: now + ALERT_HOLD_MS,
+      };
+    });
+  }, [hasData, heartRate, spo2, temp, arrhythmia, systemFlags, severityTag, rhythmAlertInstant]);
+
+  useEffect(() => {
+    if (!latchedAlert) return undefined;
+    const remaining = latchedAlert.expiresAtMs - Date.now();
+    if (remaining <= 0) {
+      setLatchedAlert(null);
+      return undefined;
+    }
+    const timer = setTimeout(() => setLatchedAlert(null), remaining);
+    return () => clearTimeout(timer);
+  }, [latchedAlert]);
+
+  const hrAlert =
+    hrAlertInstant ||
+    Boolean(latchedAlert?.messages.some((m) => /tachycardia|bradycardia|HR/i.test(m)));
+  const spo2Alert =
+    spo2AlertInstant || Boolean(latchedAlert?.messages.some((m) => /hypoxemia|SpO₂/i.test(m)));
+  const tempAlert =
+    tempAlertInstant || Boolean(latchedAlert?.messages.some((m) => /pyrexia|hypothermia|°C/i.test(m)));
+  const nibpAlert = nibpAlertInstant;
 
   const nibpGaugeValue = hasData && nibpSys != null ? nibpSys : null;
   const nibpDisplay = !hasData || nibpSys == null || nibpDia == null ? null : `${nibpSys}/${nibpDia}`;
@@ -133,7 +204,12 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
 
   return (
     <div className={`flex h-full flex-col font-mono ${shell}`}>
-      <AlarmBanner severity={hasData ? severityTag : null} systemFlags={systemFlags} />
+      <AlarmBanner
+        severity={hasData ? severityTag : null}
+        systemFlags={systemFlags}
+        latchedSeverity={latchedAlert?.severity}
+      />
+      <AlertDetailPanel alert={latchedAlert} theme={theme} />
 
       <header className={`flex shrink-0 items-center justify-between gap-4 border-b px-3 py-1.5 ${headerBg}`}>
         <div className="flex min-w-0 items-center gap-4">
@@ -181,7 +257,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
 
           <ClinicalAssessment
             hasData={hasData}
-            severity={severityTag}
+            severity={latchedAlert?.severity || severityTag}
             confidence={confidence}
             rhythmStatus={arrhythmia}
             systemFlags={systemFlags}

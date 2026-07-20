@@ -24,8 +24,8 @@ from state import patient_history
 logger = logging.getLogger("patient_monitor.mqtt")
 
 LLM_THROTTLE_SEC = 45.0
-SEVERITY_ESCALATE_TICKS = 8
-SEVERITY_DEESCALATE_TICKS = 25
+SEVERITY_ESCALATE_TICKS = 10
+SEVERITY_DEESCALATE_TICKS = 35
 
 ollama_client = ollama.Client(host=OLLAMA_HOST, timeout=15)
 
@@ -81,7 +81,7 @@ def _stabilize_vitals_flag(patient_id: str, instant: str) -> str:
         streak["pending"] = instant
         streak["count"] = 1
 
-    threshold = 6 if instant != "Stable" else 15
+    threshold = 8 if instant != "Stable" else 25
     if streak["count"] >= threshold:
         streak["active"] = instant
     return streak["active"]
