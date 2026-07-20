@@ -202,6 +202,9 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
     if telemetry_source != "simulator":
         note_real_telemetry()
 
+    patient_meta = db.get_patient(patient_id) or {}
+    full_name = patient_meta.get("full_name") or patient_id
+
     vitals_flag = _determine_vitals_flag(spo2, bpm, temp)
     raw_ecg_array = _normalize_ecg_window(raw_ecg)
     rhythm_status = "Signal Incomplete (Check Leads)"
@@ -239,7 +242,38 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
             "telemetry_source": telemetry_source,
             "room": payload.get("room"),
             "bed_number": payload.get("bed_number"),
+            "raw_ecg": raw_ecg_array,
         }
+    )
+
+    # Push vitals + ECG immediately so the UI keeps updating during slow LLM calls.
+    cached = _last_llm_assessment.get(patient_id)
+    quick_assessment = cached or _rule_based_assessment(
+        spo2, bpm, temp, rhythm_status, vitals_flag, rhythm_anomaly
+    )
+    quick_source = "llm_cached" if cached else "rules"
+
+    await ws_manager.broadcast(
+        patient_id,
+        {
+            "patient_id": patient_id,
+            "full_name": full_name,
+            "timestamp": timestamp,
+            "spo2": spo2,
+            "max_bpm": bpm,
+            "temperature_c": temp,
+            "nibp_sys": payload.get("nibp_sys"),
+            "nibp_dia": payload.get("nibp_dia"),
+            "raw_ecg": raw_ecg_array,
+            "rhythm_status": rhythm_status,
+            "system_flags": vitals_flag,
+            "severity": quick_assessment["severity"],
+            "confidence": quick_assessment["confidence"],
+            "summary": quick_assessment["summary"],
+            "recommended_action": quick_assessment["recommended_action"],
+            "assessment_source": quick_source,
+            "telemetry_source": telemetry_source,
+        },
     )
 
     prompt = _build_prompt(patient_id, spo2, bpm, temp, rhythm_status, vitals_flag)
@@ -254,7 +288,8 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
     assessment_source = "rules"
     if should_call_llm:
         try:
-            llm_response = ollama_client.generate(
+            llm_response = await asyncio.to_thread(
+                ollama_client.generate,
                 model=LOCAL_MODEL_NAME,
                 prompt=prompt,
                 format="json",
@@ -305,11 +340,9 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
             "summary": assessment["summary"],
             "recommended_action": assessment["recommended_action"],
             "assessment_source": assessment_source,
+            "raw_ecg": raw_ecg_array,
         }
     )
-
-    patient_meta = db.get_patient(patient_id) or {}
-    full_name = patient_meta.get("full_name") or patient_id
 
     result = {
         "patient_id": patient_id,

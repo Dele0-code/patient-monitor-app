@@ -33,7 +33,7 @@ function VitalBlock({ label, value, unit, alert, color = "text-emerald-400", lar
 
 export default function PatientMonitor({ patientId, liveEvent, connectionStatus }) {
   const patientMeta = getPatient(patientId);
-  const hasData = connectionStatus === "live";
+  const hasData = liveEvent != null && connectionStatus !== "offline";
 
   const [heartRate, setHeartRate] = useState(null);
   const [spo2, setSpo2] = useState(null);
@@ -65,7 +65,8 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
   }, []);
 
   useEffect(() => {
-    if (!hasData) {
+    if (!liveEvent) return;
+    if (connectionStatus === "offline") {
       setHeartRate(null);
       setSpo2(null);
       setTemp(null);
@@ -82,7 +83,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
       setRawEcg(null);
       return;
     }
-    if (!liveEvent) return;
+
     setHeartRate(liveEvent.max_bpm ?? null);
     setSpo2(liveEvent.spo2 ?? null);
     setTemp(liveEvent.temperature_c ?? null);
@@ -99,7 +100,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
     if (liveEvent.raw_ecg?.length) {
       setRawEcg(liveEvent.raw_ecg);
     }
-  }, [hasData, liveEvent]);
+  }, [connectionStatus, liveEvent]);
 
   const triggerBeep = useCallback((freq, duration, volume = 0.05) => {
     if (!audioEnabledRef.current) return;
@@ -155,6 +156,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
       : patientMeta?.ward || "Bedside";
 
   const isDemoData = hasData && telemetrySource === "simulator";
+  const isLiveFeed = connectionStatus === "live";
 
   return (
     <div className="flex h-full flex-col bg-black font-mono text-slate-100">
@@ -182,7 +184,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
         </div>
 
         <div className="flex shrink-0 items-center gap-5">
-          <ConnectionBadge status={connectionStatus} demoMode={isDemoData} />
+          <ConnectionBadge status={isLiveFeed ? connectionStatus : "connecting"} demoMode={isDemoData} />
           <div className="text-right">
             <div className="text-lg font-bold tabular-nums tracking-wider text-emerald-400">
               {currentTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}

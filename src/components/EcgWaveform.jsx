@@ -1,11 +1,10 @@
 import { useEffect, useRef } from "react";
 
-/** Clinical monitor green — Philips/GE style, not neon */
 const TRACE_COLOR = "#00e676";
 const GRID_FINE = "rgba(0, 180, 80, 0.12)";
 const GRID_BOLD = "rgba(0, 180, 80, 0.28)";
 const BG_COLOR = "#000000";
-const ERASE_GAP = 18;
+const ERASE_GAP = 14;
 
 function drawGrid(ctx, width, height) {
   ctx.fillStyle = BG_COLOR;
@@ -30,7 +29,6 @@ function drawGrid(ctx, width, height) {
   }
 
   ctx.strokeStyle = GRID_BOLD;
-  ctx.lineWidth = 1;
   for (let x = 0; x <= width; x += boldStep) {
     ctx.beginPath();
     ctx.moveTo(x + 0.5, 0);
@@ -64,8 +62,8 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
     if (!hasSignal || !rawEcg?.length) return;
     const normalized = normalizeSamples(rawEcg);
     sampleQueueRef.current.push(...normalized);
-    if (sampleQueueRef.current.length > 2000) {
-      sampleQueueRef.current = sampleQueueRef.current.slice(-1000);
+    if (sampleQueueRef.current.length > 3000) {
+      sampleQueueRef.current = sampleQueueRef.current.slice(-2000);
     }
   }, [rawEcg, hasSignal]);
 
@@ -99,17 +97,15 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
     };
 
     const eraseAhead = (x) => {
-      const eraseX = x;
+      const eraseX = Math.max(0, x);
       ctx.fillStyle = BG_COLOR;
       ctx.fillRect(eraseX, 0, ERASE_GAP, height);
 
-      // Redraw grid only in erase band
       const fineStep = 8;
       const boldStep = 40;
       ctx.strokeStyle = GRID_FINE;
       ctx.lineWidth = 1;
       for (let gx = Math.floor(eraseX / fineStep) * fineStep; gx <= eraseX + ERASE_GAP; gx += fineStep) {
-        if (gx < 0) continue;
         ctx.beginPath();
         ctx.moveTo(gx + 0.5, 0);
         ctx.lineTo(gx + 0.5, height);
@@ -123,7 +119,6 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
       }
       ctx.strokeStyle = GRID_BOLD;
       for (let gx = Math.floor(eraseX / boldStep) * boldStep; gx <= eraseX + ERASE_GAP; gx += boldStep) {
-        if (gx < 0) continue;
         ctx.beginPath();
         ctx.moveTo(gx + 0.5, 0);
         ctx.lineTo(gx + 0.5, height);
@@ -139,12 +134,10 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
 
     const drawSegment = (x1, y1, x2, y2) => {
       eraseAhead(x2);
-
       ctx.strokeStyle = TRACE_COLOR;
       ctx.lineWidth = 2;
-      ctx.lineCap = "butt";
-      ctx.lineJoin = "miter";
-      ctx.shadowBlur = 0;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
@@ -166,27 +159,33 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
         sweepXRef.current = 0;
         lastYRef.current = baselineY;
       } else {
-        // ~25 mm/s visual sweep rate on typical display width
-        const samplesPerSecond = 120;
-        const pixelsPerSample = 2;
+        // Match ~100 incoming samples/sec (1 MQTT packet/sec with 100 points)
+        const samplesPerSecond = 45;
+        const pixelsPerSample = Math.max(1.5, width / 250);
         const samplesToDraw = Math.max(1, Math.floor(dt * samplesPerSecond));
 
         for (let i = 0; i < samplesToDraw; i += 1) {
           const sample = sampleQueueRef.current.shift();
           if (sample === undefined) break;
 
-          const nextX = sweepXRef.current + pixelsPerSample;
-          const nextY = baselineY - sample * (height * 0.36);
+          let x1 = sweepXRef.current;
+          let x2 = x1 + pixelsPerSample;
+          const y1 = lastYRef.current;
+          const y2 = baselineY - sample * (height * 0.42);
 
-          if (nextX >= width) {
+          if (x2 >= width) {
+            x2 = width - 1;
+            drawSegment(x1, y1, x2, y2);
+            drawGrid(ctx, width, height);
             sweepXRef.current = 0;
-            lastYRef.current = nextY;
-            continue;
+            lastYRef.current = baselineY;
+            x1 = 0;
+            x2 = pixelsPerSample;
           }
 
-          drawSegment(sweepXRef.current, lastYRef.current, nextX, nextY);
-          sweepXRef.current = nextX;
-          lastYRef.current = nextY;
+          drawSegment(x1, y1, x2, y2);
+          sweepXRef.current = x2;
+          lastYRef.current = y2;
         }
       }
 

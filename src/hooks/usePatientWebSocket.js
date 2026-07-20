@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { getWsUrl } from "../apiConfig.js";
 
 const BACKOFF_STEPS_MS = [1000, 2000, 4000, 8000, 10000];
-const LIVE_TIMEOUT_MS = 5000;
+const LIVE_TIMEOUT_MS = 30000;
+const PING_INTERVAL_MS = 20000;
 
 export function usePatientWebSocket(patientId) {
   const [liveEvent, setLiveEvent] = useState(null);
@@ -10,6 +11,7 @@ export function usePatientWebSocket(patientId) {
   const wsRef = useRef(null);
   const reconnectTimerRef = useRef(null);
   const statusTimerRef = useRef(null);
+  const pingTimerRef = useRef(null);
   const backoffIndexRef = useRef(0);
   const lastMessageAtRef = useRef(null);
   const mountedRef = useRef(true);
@@ -25,32 +27,44 @@ export function usePatientWebSocket(patientId) {
       }
     };
 
+    const clearPingTimer = () => {
+      if (pingTimerRef.current) {
+        clearInterval(pingTimerRef.current);
+        pingTimerRef.current = null;
+      }
+    };
+
     const scheduleReconnect = () => {
       if (!mountedRef.current) return;
       clearReconnectTimer();
       const delay = BACKOFF_STEPS_MS[Math.min(backoffIndexRef.current, BACKOFF_STEPS_MS.length - 1)];
       backoffIndexRef.current = Math.min(backoffIndexRef.current + 1, BACKOFF_STEPS_MS.length - 1);
-      setConnectionStatus("offline");
+      setConnectionStatus((prev) => (prev === "live" ? "connecting" : "offline"));
       reconnectTimerRef.current = setTimeout(connect, delay);
     };
 
     const connect = () => {
       if (!mountedRef.current) return;
       clearReconnectTimer();
+      clearPingTimer();
 
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
       }
 
-      setConnectionStatus("connecting");
+      setConnectionStatus((prev) => (prev === "live" ? "connecting" : "connecting"));
       const wsUrl = getWsUrl(patientId);
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.addEventListener("open", () => {
         if (!mountedRef.current) return;
-        setConnectionStatus("connecting");
+        pingTimerRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send("ping");
+          }
+        }, PING_INTERVAL_MS);
       });
 
       ws.addEventListener("message", (event) => {
@@ -58,7 +72,9 @@ export function usePatientWebSocket(patientId) {
         backoffIndexRef.current = 0;
         lastMessageAtRef.current = Date.now();
         try {
-          setLiveEvent(JSON.parse(event.data));
+          const payload = JSON.parse(event.data);
+          if (payload?.type === "ping") return;
+          setLiveEvent(payload);
         } catch {
           setLiveEvent({ message: event.data });
         }
@@ -67,11 +83,12 @@ export function usePatientWebSocket(patientId) {
 
       ws.addEventListener("error", () => {
         if (!mountedRef.current) return;
-        setConnectionStatus("offline");
+        setConnectionStatus((prev) => (prev === "live" ? "connecting" : "offline"));
       });
 
       ws.addEventListener("close", () => {
         if (!mountedRef.current) return;
+        clearPingTimer();
         wsRef.current = null;
         scheduleReconnect();
       });
@@ -85,7 +102,7 @@ export function usePatientWebSocket(patientId) {
       if (ws?.readyState === WebSocket.OPEN) {
         if (lastMessageAt && Date.now() - lastMessageAt <= LIVE_TIMEOUT_MS) {
           setConnectionStatus("live");
-        } else {
+        } else if (lastMessageAt) {
           setConnectionStatus("connecting");
         }
         return;
@@ -96,7 +113,7 @@ export function usePatientWebSocket(patientId) {
         return;
       }
 
-      if (!reconnectTimerRef.current) {
+      if (!reconnectTimerRef.current && !lastMessageAt) {
         setConnectionStatus("offline");
       }
     }, 500);
@@ -106,6 +123,7 @@ export function usePatientWebSocket(patientId) {
     return () => {
       mountedRef.current = false;
       clearReconnectTimer();
+      clearPingTimer();
       if (statusTimerRef.current) {
         clearInterval(statusTimerRef.current);
         statusTimerRef.current = null;

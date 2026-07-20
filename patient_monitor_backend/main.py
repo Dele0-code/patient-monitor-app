@@ -249,7 +249,14 @@ async def websocket_endpoint(websocket: WebSocket, patient_id: str):
 
     try:
         while True:
-            await websocket.receive_text()
+            # Keep connection alive; client may send pings or stay silent.
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=60)
+            except asyncio.TimeoutError:
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    break
     except asyncio.CancelledError:
         pass
     except Exception:
