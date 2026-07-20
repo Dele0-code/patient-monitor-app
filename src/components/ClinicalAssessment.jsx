@@ -16,6 +16,12 @@ const SEVERITY_STYLE = {
   },
 };
 
+const SOURCE_LABEL = {
+  llm: "OLLAMA LLM",
+  llm_cached: "LLM (CACHED)",
+  rules: "RULE ENGINE",
+};
+
 function ConfidenceMeter({ value }) {
   if (value == null || Number.isNaN(Number(value))) {
     return <span className="text-slate-600">—</span>;
@@ -39,9 +45,11 @@ export default function ClinicalAssessment({
   systemFlags,
   summary,
   recommendedAction,
+  assessmentSource,
 }) {
   const style = SEVERITY_STYLE[severity] || SEVERITY_STYLE.stable;
   const rhythmAlert = hasData && rhythmStatus && !String(rhythmStatus).toLowerCase().includes("normal");
+  const sourceLabel = SOURCE_LABEL[assessmentSource] || (hasData ? "PENDING" : "—");
 
   if (!hasData) {
     return (
@@ -58,10 +66,20 @@ export default function ClinicalAssessment({
       <div className={`h-0.5 w-full ${style.bar}`} />
 
       <div className="flex flex-1 flex-col gap-3 px-3 py-2.5 sm:flex-row sm:gap-5">
-        {/* Severity + meta */}
-        <div className="flex shrink-0 flex-col gap-2 sm:w-44">
-          <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">
-            Clinical Assessment
+        <div className="flex shrink-0 flex-col gap-2 sm:w-48">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">
+              Clinical Assessment
+            </div>
+            <span
+              className={`border px-1.5 py-0.5 text-[9px] font-bold tracking-wider ${
+                assessmentSource === "llm" || assessmentSource === "llm_cached"
+                  ? "border-violet-700 text-violet-300"
+                  : "border-slate-700 text-slate-400"
+              }`}
+            >
+              {sourceLabel}
+            </span>
           </div>
           <div className={`inline-flex w-fit border px-2.5 py-1 text-sm font-bold tracking-widest ${style.badge}`}>
             {style.label}
@@ -90,11 +108,10 @@ export default function ClinicalAssessment({
           </div>
         </div>
 
-        {/* LLM / rule prediction text */}
         <div className="flex min-w-0 flex-1 flex-col gap-2 border-t border-slate-800 pt-2 sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
           <div>
             <div className="mb-1 text-[9px] font-bold uppercase tracking-widest text-slate-600">
-              Prediction Summary
+              {assessmentSource === "rules" ? "Rule Summary" : "LLM Prediction Summary"}
             </div>
             <p className="text-sm leading-relaxed text-slate-200">
               {summary || "No assessment text available yet."}

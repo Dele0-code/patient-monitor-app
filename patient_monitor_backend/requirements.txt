@@ -1,6 +1,5 @@
 fastapi
 uvicorn
-supabase
 ollama
 python-dotenv
 pydantic

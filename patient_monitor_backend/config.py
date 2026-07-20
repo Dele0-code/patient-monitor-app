@@ -12,7 +12,13 @@ SIMULATE_ESP32 = os.environ.get("SIMULATE_ESP32", "false").lower() in ("1", "tru
 SIMULATED_PATIENT_ID = os.environ.get("SIMULATED_PATIENT_ID", "PT-000001")
 SIMULATOR_RATE_SEC = float(os.environ.get("SIMULATOR_RATE_SEC", "1.0"))
 
-USE_LLM = os.environ.get("USE_LLM", "false" if SIMULATE_ESP32 else "true").lower() in ("1", "true", "yes")
+USE_LLM = os.environ.get("USE_LLM", "true").lower() in ("1", "true", "yes")
+
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+LOCAL_MODEL_NAME = os.environ.get("LOCAL_MODEL_NAME", "qwen2.5:0.5b")
+ECG_MODEL_PATH = os.environ.get("ECG_MODEL_PATH", "ecg_model_100hz.pt")
+
+SQLITE_PATH = os.environ.get("SQLITE_PATH", "patient_monitor.db")
 
 ECG_SEQUENCE_LEN = 100
 LIVE_PATIENT_ID = "PT-000001"

@@ -1,9 +1,20 @@
 # Ignore a specific file
 secret_keys.txt
 
+# Env files with secrets / machine-specific URLs
+.env
+.env.local
+.env.*.local
+patient_monitor_backend/.env
+
 # Ignore a whole directory (and everything in it)
 node_modules/
 build/
+dist/
+patient_monitor_backend/patient_monitor.db
+*.db
+__pycache__/
+*.pyc
 
 # Ignore all files ending in a specific extension (e.g., log files)
 *.log

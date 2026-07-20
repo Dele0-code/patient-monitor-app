@@ -45,6 +45,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
   const [recommendedAction, setRecommendedAction] = useState(null);
   const [severityTag, setSeverityTag] = useState(null);
   const [confidence, setConfidence] = useState(null);
+  const [assessmentSource, setAssessmentSource] = useState(null);
   const [systemFlags, setSystemFlags] = useState(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -74,6 +75,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
       setRecommendedAction(null);
       setSeverityTag(null);
       setConfidence(null);
+      setAssessmentSource(null);
       setSystemFlags(null);
       setRawEcg(null);
       return;
@@ -89,6 +91,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
     setRecommendedAction(liveEvent.recommended_action ?? null);
     setSeverityTag(liveEvent.severity ?? null);
     setConfidence(liveEvent.confidence ?? null);
+    setAssessmentSource(liveEvent.assessment_source ?? null);
     setSystemFlags(liveEvent.system_flags ?? null);
     if (liveEvent.raw_ecg?.length) {
       setRawEcg(liveEvent.raw_ecg);
@@ -193,6 +196,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
             systemFlags={systemFlags}
             summary={summaryText}
             recommendedAction={recommendedAction}
+            assessmentSource={assessmentSource}
           />
         </section>
 

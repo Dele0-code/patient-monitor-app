@@ -6,18 +6,25 @@ from typing import Any
 
 import ollama
 import paho.mqtt.client as mqtt
-from supabase import create_client
 
+import db
 import ws_manager
-from config import ECG_SEQUENCE_LEN, MQTT_BROKER_HOST, MQTT_BROKER_PORT, USE_LLM, telemetry_subscription_filter
-from main import LOCAL_MODEL_NAME, OLLAMA_HOST, SUPABASE_KEY, SUPABASE_URL, ecg_model
+from config import (
+    ECG_SEQUENCE_LEN,
+    LOCAL_MODEL_NAME,
+    MQTT_BROKER_HOST,
+    MQTT_BROKER_PORT,
+    OLLAMA_HOST,
+    USE_LLM,
+    telemetry_subscription_filter,
+)
+from main import ecg_model
 from state import patient_history
 
 logger = logging.getLogger("patient_monitor.mqtt")
 
 LLM_THROTTLE_SEC = 12.0
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 ollama_client = ollama.Client(host=OLLAMA_HOST, timeout=15)
 
 _last_rule_severity: dict[str, str] = {}
@@ -89,7 +96,7 @@ The JSON must contain these keys:
 def _sanitize_json_text(text: str) -> str:
     text = text.strip()
     if text.startswith("```json") and text.endswith("```"):
-        text = text[len("```json"): -3].strip()
+        text = text[len("```json") : -3].strip()
     elif text.startswith("```") and text.endswith("```"):
         text = text[3:-3].strip()
     return text
@@ -121,6 +128,7 @@ def _parse_llm_response(text: str) -> dict[str, Any]:
             "confidence": confidence,
             "summary": summary,
             "recommended_action": recommended_action,
+            "assessment_source": "llm",
         }
     except Exception as exc:
         logger.warning("Malformed LLM output, falling back to safe defaults: %s", exc)
@@ -129,6 +137,7 @@ def _parse_llm_response(text: str) -> dict[str, Any]:
             "confidence": 0.0,
             "summary": "Automated assessment unavailable; review the patient telemetry directly.",
             "recommended_action": "Please verify the patient and follow your escalation protocol.",
+            "assessment_source": "rules",
         }
 
 
@@ -158,6 +167,7 @@ def _rule_based_assessment(
         "confidence": 0.82,
         "summary": summary,
         "recommended_action": action,
+        "assessment_source": "rules",
     }
 
 
@@ -183,9 +193,9 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
     rhythm_anomaly = False
 
     if raw_ecg_array is not None and ecg_model is not None:
-        ecg_tensor = None
         try:
             import torch
+
             ecg_tensor = torch.tensor(raw_ecg_array, dtype=torch.float32).view(1, 1, ECG_SEQUENCE_LEN)
             with torch.no_grad():
                 prediction = ecg_model(ecg_tensor)
@@ -196,22 +206,25 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
             logger.warning("ECG inference failed for %s: %s", patient_id, exc)
             rhythm_status = "ECG analysis unavailable"
 
-    patient_history[patient_id].append({
-        "timestamp": timestamp,
-        "spo2": spo2,
-        "max_bpm": bpm,
-        "temperature_c": temp,
-        "nibp_sys": payload.get("nibp_sys"),
-        "nibp_dia": payload.get("nibp_dia"),
-        "rhythm_status": rhythm_status,
-        "vitals_flag": vitals_flag,
-        "severity": None,
-        "confidence": None,
-        "summary": None,
-        "recommended_action": None,
-        "room": payload.get("room"),
-        "bed_number": payload.get("bed_number"),
-    })
+    patient_history[patient_id].append(
+        {
+            "timestamp": timestamp,
+            "spo2": spo2,
+            "max_bpm": bpm,
+            "temperature_c": temp,
+            "nibp_sys": payload.get("nibp_sys"),
+            "nibp_dia": payload.get("nibp_dia"),
+            "rhythm_status": rhythm_status,
+            "vitals_flag": vitals_flag,
+            "severity": None,
+            "confidence": None,
+            "summary": None,
+            "recommended_action": None,
+            "assessment_source": None,
+            "room": payload.get("room"),
+            "bed_number": payload.get("bed_number"),
+        }
+    )
 
     prompt = _build_prompt(patient_id, spo2, bpm, temp, rhythm_status, vitals_flag)
     rule_severity = _determine_severity(spo2, bpm, temp, rhythm_anomaly)
@@ -222,6 +235,7 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
     throttle_elapsed = now - last_llm_at >= LLM_THROTTLE_SEC
     should_call_llm = USE_LLM and (previous_rule_severity is None or severity_changed or throttle_elapsed)
 
+    assessment_source = "rules"
     if should_call_llm:
         try:
             llm_response = ollama_client.generate(
@@ -233,6 +247,7 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
             assessment = _parse_llm_response(llm_response.get("response", ""))
             _last_llm_assessment[patient_id] = assessment
             _last_llm_call_time[patient_id] = now
+            assessment_source = assessment.get("assessment_source", "llm")
             if severity_changed:
                 logger.info(
                     "Severity changed for %s (%s -> %s); refreshed LLM assessment immediately",
@@ -242,23 +257,39 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
                 )
         except Exception as exc:
             logger.warning("LLM generation failed for %s: %s", patient_id, exc)
-            assessment = _last_llm_assessment.get(patient_id) or _rule_based_assessment(
+            cached = _last_llm_assessment.get(patient_id)
+            if cached:
+                assessment = {**cached, "assessment_source": "llm_cached"}
+                assessment_source = "llm_cached"
+            else:
+                assessment = _rule_based_assessment(
+                    spo2, bpm, temp, rhythm_status, vitals_flag, rhythm_anomaly
+                )
+                assessment_source = "rules"
+    else:
+        cached = _last_llm_assessment.get(patient_id)
+        if cached:
+            assessment = {**cached, "assessment_source": "llm_cached"}
+            assessment_source = "llm_cached"
+        else:
+            assessment = _rule_based_assessment(
                 spo2, bpm, temp, rhythm_status, vitals_flag, rhythm_anomaly
             )
-    else:
-        assessment = _last_llm_assessment.get(patient_id) or _rule_based_assessment(
-            spo2, bpm, temp, rhythm_status, vitals_flag, rhythm_anomaly
-        )
+            assessment_source = "rules"
 
+    assessment["assessment_source"] = assessment_source
     _last_rule_severity[patient_id] = rule_severity
 
     latest_entry = patient_history[patient_id][-1]
-    latest_entry.update({
-        "severity": assessment["severity"],
-        "confidence": assessment["confidence"],
-        "summary": assessment["summary"],
-        "recommended_action": assessment["recommended_action"],
-    })
+    latest_entry.update(
+        {
+            "severity": assessment["severity"],
+            "confidence": assessment["confidence"],
+            "summary": assessment["summary"],
+            "recommended_action": assessment["recommended_action"],
+            "assessment_source": assessment_source,
+        }
+    )
 
     result = {
         "patient_id": patient_id,
@@ -275,17 +306,20 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
         "confidence": assessment["confidence"],
         "summary": assessment["summary"],
         "recommended_action": assessment["recommended_action"],
+        "assessment_source": assessment_source,
     }
 
     try:
-        supabase.table("clinical_insights").insert({
-            "patient_id": patient_id,
-            "rhythm_status": rhythm_status,
-            "system_flags": vitals_flag,
-            "assessment_text": assessment["summary"],
-            "severity": assessment["severity"],
-            "confidence": assessment["confidence"],
-        }).execute()
+        db.insert_clinical_insight(
+            patient_id=patient_id,
+            rhythm_status=rhythm_status,
+            system_flags=vitals_flag,
+            assessment_text=assessment["summary"],
+            recommended_action=assessment["recommended_action"],
+            severity=assessment["severity"],
+            confidence=assessment["confidence"],
+            assessment_source=assessment_source,
+        )
     except Exception as exc:
         logger.exception("Failed to insert clinical_insights for %s: %s", patient_id, exc)
 
