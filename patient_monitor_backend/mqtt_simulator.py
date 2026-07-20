@@ -89,6 +89,7 @@ def build_payload(patient_id: str, anomalous: bool = False) -> dict[str, Any]:
         "nibp_dia": None,
         "room": "ICU",
         "bed_number": "B",
+        "full_name": "Adedayo Segun",
         "raw_ecg": generate_esp32_ecg(bpm),
         "telemetry_source": "simulator",
     }

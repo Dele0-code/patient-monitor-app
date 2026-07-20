@@ -1,12 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { getWsUrl } from "../apiConfig.js";
 
 const BACKOFF_STEPS_MS = [1000, 2000, 4000, 8000, 10000];
 const LIVE_TIMEOUT_MS = 5000;
-
-function getWsUrl(patientId) {
-  const host = import.meta.env.VITE_API_BASE || "http://localhost:8000";
-  return `${host.replace(/^http/, "ws")}/ws/${encodeURIComponent(patientId)}`;
-}
 
 export function usePatientWebSocket(patientId) {
   const [liveEvent, setLiveEvent] = useState(null);
@@ -48,7 +44,8 @@ export function usePatientWebSocket(patientId) {
       }
 
       setConnectionStatus("connecting");
-      const ws = new WebSocket(getWsUrl(patientId));
+      const wsUrl = getWsUrl(patientId);
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.addEventListener("open", () => {

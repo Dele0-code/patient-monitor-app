@@ -74,8 +74,25 @@ def init_db() -> None:
                     (patient_id, full_name, age, gender, ward, room, bed_number, active)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 1)
                 """,
-                ("PT-000001", "Bedside Monitor", None, None, "ICU", None, None),
+                ("PT-000001", "Adedayo Segun", None, None, "ICU", None, None),
             )
+        else:
+            conn.execute(
+                "UPDATE patients SET full_name = ? WHERE patient_id = ?",
+                ("Adedayo Segun", "PT-000001"),
+            )
+
+
+def get_patient(patient_id: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT patient_id, full_name, age, gender, ward, room, bed_number, active
+            FROM patients WHERE patient_id = ?
+            """,
+            (patient_id,),
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def list_patients(query: str = "") -> list[dict[str, Any]]:

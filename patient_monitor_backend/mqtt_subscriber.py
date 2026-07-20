@@ -8,6 +8,7 @@ import ollama
 import paho.mqtt.client as mqtt
 
 import db
+import db
 import ws_manager
 from config import (
     ECG_SEQUENCE_LEN,
@@ -298,6 +299,7 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
     latest_entry = patient_history[patient_id][-1]
     latest_entry.update(
         {
+            "full_name": full_name,
             "severity": assessment["severity"],
             "confidence": assessment["confidence"],
             "summary": assessment["summary"],
@@ -306,8 +308,12 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
         }
     )
 
+    patient_meta = db.get_patient(patient_id) or {}
+    full_name = patient_meta.get("full_name") or patient_id
+
     result = {
         "patient_id": patient_id,
+        "full_name": full_name,
         "timestamp": timestamp,
         "spo2": spo2,
         "max_bpm": bpm,

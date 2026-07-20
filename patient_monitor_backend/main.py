@@ -239,6 +239,14 @@ async def ward_triage():
 async def websocket_endpoint(websocket: WebSocket, patient_id: str):
     await websocket.accept()
     await ws_manager.register(patient_id, websocket)
+
+    history = patient_history.get(patient_id)
+    if history:
+        try:
+            await websocket.send_json(history[-1])
+        except Exception:
+            pass
+
     try:
         while True:
             await websocket.receive_text()

@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+import { getApiBase } from "./apiConfig.js";
 
 async function parseApiResponse(response) {
   const text = await response.text();
@@ -25,18 +25,23 @@ async function parseApiResponse(response) {
   }
 }
 
+function apiUrl(path) {
+  const base = getApiBase();
+  return base ? `${base}${path}` : path;
+}
+
 export async function searchPatients(query = "") {
-  const url = `${API_BASE}/api/patients/search?q=${encodeURIComponent(query)}`;
+  const url = `${apiUrl("/api/patients/search")}?q=${encodeURIComponent(query)}`;
   const response = await fetch(url);
   return parseApiResponse(response);
 }
 
 export async function getPatientLatest(patientId) {
-  const response = await fetch(`${API_BASE}/api/patients/${encodeURIComponent(patientId)}/latest`);
+  const response = await fetch(apiUrl(`/api/patients/${encodeURIComponent(patientId)}/latest`));
   return parseApiResponse(response);
 }
 
 export async function getWardTriage() {
-  const response = await fetch(`${API_BASE}/api/ward/triage`);
+  const response = await fetch(apiUrl("/api/ward/triage"));
   return parseApiResponse(response);
 }

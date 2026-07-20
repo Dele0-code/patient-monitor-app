@@ -146,7 +146,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
   const nibpDisplay =
     !hasData || nibpSys == null || nibpDia == null ? NO_SIGNAL : `${nibpSys}/${nibpDia}`;
 
-  const displayName = liveEvent?.full_name || patientMeta?.full_name || "Bedside Monitor";
+  const displayName = liveEvent?.full_name || patientMeta?.full_name || "Adedayo Segun";
   const room = liveEvent?.room || patientMeta?.room;
   const bed = liveEvent?.bed_number || patientMeta?.bed_number;
   const location =
@@ -167,15 +167,15 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
 
       <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-800 bg-[#0a0a0a] px-3 py-1.5">
         <div className="flex min-w-0 items-center gap-4">
-          <div className="shrink-0">
-            <div className="text-[9px] uppercase tracking-widest text-slate-600">ID</div>
-            <div className="text-sm font-bold text-emerald-400">{patientId}</div>
-          </div>
           <div className="min-w-0">
             <div className="text-[9px] uppercase tracking-widest text-slate-600">Patient</div>
-            <div className="truncate text-sm font-bold text-white">{displayName}</div>
+            <div className="truncate text-lg font-bold text-emerald-400">{displayName}</div>
           </div>
           <div className="hidden shrink-0 sm:block">
+            <div className="text-[9px] uppercase tracking-widest text-slate-600">ID</div>
+            <div className="text-sm font-bold text-slate-400">{patientId}</div>
+          </div>
+          <div className="hidden shrink-0 md:block">
             <div className="text-[9px] uppercase tracking-widest text-slate-600">Location</div>
             <div className="text-sm font-bold text-slate-300">{location}</div>
           </div>
