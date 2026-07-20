@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
 import torch
@@ -13,8 +14,10 @@ import auth
 import db
 import ws_manager
 from config import (
+    AUTO_SIMULATE_WHEN_IDLE,
     ECG_MODEL_PATH,
     ECG_SEQUENCE_LEN,
+    IDLE_SIMULATOR_SEC,
     MQTT_TOPIC_PREFIX,
     SIMULATE_ESP32,
     SIMULATED_PATIENT_ID,
@@ -63,6 +66,45 @@ device = torch.device("cpu")
 ecg_model: ECGNet | None = None
 
 
+async def _idle_simulator_watchdog(app_stop: asyncio.Event) -> None:
+    """Start changing dummy vitals when no real ESP32 telemetry arrives."""
+    import mqtt_subscriber
+
+    if SIMULATE_ESP32 or not AUTO_SIMULATE_WHEN_IDLE:
+        await app_stop.wait()
+        return
+
+    simulator_task: asyncio.Task | None = None
+    simulator_stop = asyncio.Event()
+
+    while not app_stop.is_set():
+        await asyncio.sleep(2)
+        last_real = mqtt_subscriber.get_last_real_telemetry_at()
+        now = time.monotonic()
+        idle = last_real is None or (now - last_real) >= IDLE_SIMULATOR_SEC
+
+        if idle and simulator_task is None:
+            import mqtt_simulator
+
+            simulator_stop.clear()
+            simulator_task = asyncio.create_task(
+                mqtt_simulator.start_simulator(app_stop, local_stop=simulator_stop)
+            )
+            logger.info(
+                "No ESP32 telemetry for %.0fs — auto dummy simulator started",
+                IDLE_SIMULATOR_SEC,
+            )
+        elif not idle and simulator_task is not None:
+            simulator_stop.set()
+            simulator_task.cancel()
+            try:
+                await simulator_task
+            except asyncio.CancelledError:
+                pass
+            simulator_task = None
+            logger.info("ESP32 telemetry detected — auto dummy simulator stopped")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global ecg_model
@@ -95,6 +137,12 @@ async def lifespan(app: FastAPI):
                 "ESP32 simulator running for %s — set SIMULATE_ESP32=false when hardware is connected",
                 SIMULATED_PATIENT_ID,
             )
+        else:
+            app.state.idle_watchdog_task = asyncio.create_task(_idle_simulator_watchdog(stop_event))
+            logger.info(
+                "Auto dummy mode enabled — simulator starts after %.0fs without ESP32 data",
+                IDLE_SIMULATOR_SEC,
+            )
     except Exception as exc:
         logger.exception("Failed to start MQTT services: %s", exc)
         raise
@@ -106,6 +154,8 @@ async def lifespan(app: FastAPI):
         await app.state.mqtt_task
     if hasattr(app.state, "simulator_task"):
         await app.state.simulator_task
+    if hasattr(app.state, "idle_watchdog_task"):
+        await app.state.idle_watchdog_task
 
 
 app = FastAPI(title="Patient Monitor Backend", lifespan=lifespan)
@@ -122,7 +172,11 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
+    import mqtt_subscriber
     from config import SQLITE_PATH, USE_LLM
+
+    last_real = mqtt_subscriber.get_last_real_telemetry_at()
+    esp32_connected = last_real is not None and (time.monotonic() - last_real) < IDLE_SIMULATOR_SEC
 
     return {
         "status": "ok",
@@ -132,6 +186,9 @@ async def health():
         "use_llm": USE_LLM,
         "mqtt_topic_prefix": MQTT_TOPIC_PREFIX,
         "esp32_simulation": SIMULATE_ESP32,
+        "auto_simulate_when_idle": AUTO_SIMULATE_WHEN_IDLE,
+        "idle_simulator_sec": IDLE_SIMULATOR_SEC,
+        "esp32_connected": esp32_connected,
         "simulated_patient_id": SIMULATED_PATIENT_ID if SIMULATE_ESP32 else None,
         "ecg_sequence_len": ECG_SEQUENCE_LEN,
     }

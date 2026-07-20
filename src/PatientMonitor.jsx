@@ -46,6 +46,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
   const [severityTag, setSeverityTag] = useState(null);
   const [confidence, setConfidence] = useState(null);
   const [assessmentSource, setAssessmentSource] = useState(null);
+  const [telemetrySource, setTelemetrySource] = useState(null);
   const [systemFlags, setSystemFlags] = useState(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -76,6 +77,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
       setSeverityTag(null);
       setConfidence(null);
       setAssessmentSource(null);
+      setTelemetrySource(null);
       setSystemFlags(null);
       setRawEcg(null);
       return;
@@ -92,6 +94,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
     setSeverityTag(liveEvent.severity ?? null);
     setConfidence(liveEvent.confidence ?? null);
     setAssessmentSource(liveEvent.assessment_source ?? null);
+    setTelemetrySource(liveEvent.telemetry_source ?? null);
     setSystemFlags(liveEvent.system_flags ?? null);
     if (liveEvent.raw_ecg?.length) {
       setRawEcg(liveEvent.raw_ecg);
@@ -151,9 +154,16 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
       ? `${room} / ${bed}`
       : patientMeta?.ward || "Bedside";
 
+  const isDemoData = hasData && telemetrySource === "simulator";
+
   return (
     <div className="flex h-full flex-col bg-black font-mono text-slate-100">
       <AlarmBanner severity={hasData ? severityTag : null} systemFlags={systemFlags} />
+      {isDemoData && (
+        <div className="bg-amber-600 px-3 py-1 text-center text-[10px] font-bold uppercase tracking-[0.2em] text-black">
+          Demo mode — ESP32 not connected · simulated vitals updating every second
+        </div>
+      )}
 
       <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-800 bg-[#0a0a0a] px-3 py-1.5">
         <div className="flex min-w-0 items-center gap-4">
@@ -172,7 +182,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
         </div>
 
         <div className="flex shrink-0 items-center gap-5">
-          <ConnectionBadge status={connectionStatus} />
+          <ConnectionBadge status={connectionStatus} demoMode={isDemoData} />
           <div className="text-right">
             <div className="text-lg font-bold tabular-nums tracking-wider text-emerald-400">
               {currentTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}

@@ -90,10 +90,11 @@ def build_payload(patient_id: str, anomalous: bool = False) -> dict[str, Any]:
         "room": "ICU",
         "bed_number": "B",
         "raw_ecg": generate_esp32_ecg(bpm),
+        "telemetry_source": "simulator",
     }
 
 
-async def start_simulator(stop_event) -> None:
+async def start_simulator(stop_event, local_stop: asyncio.Event | None = None) -> None:
     """
     Async simulator that publishes ESP32-compatible telemetry over MQTT.
 
@@ -122,7 +123,7 @@ async def start_simulator(stop_event) -> None:
 
     try:
         # Run until the provided asyncio Event is set.
-        while not stop_event.is_set():
+        while not stop_event.is_set() and not (local_stop and local_stop.is_set()):
             try:
                 anomalous = random.random() < anomaly_rate
                 payload = build_payload(patient_id, anomalous)

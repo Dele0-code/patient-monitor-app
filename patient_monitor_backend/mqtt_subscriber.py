@@ -30,6 +30,16 @@ ollama_client = ollama.Client(host=OLLAMA_HOST, timeout=15)
 _last_rule_severity: dict[str, str] = {}
 _last_llm_assessment: dict[str, dict[str, Any]] = {}
 _last_llm_call_time: dict[str, float] = {}
+_last_real_telemetry_at: float | None = None
+
+
+def note_real_telemetry() -> None:
+    global _last_real_telemetry_at
+    _last_real_telemetry_at = time.monotonic()
+
+
+def get_last_real_telemetry_at() -> float | None:
+    return _last_real_telemetry_at
 
 
 def _normalize_ecg_window(raw_ecg: list[float]) -> list[float] | None:
@@ -183,9 +193,13 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
         temp = float(payload.get("temperature_c", 0))
         raw_ecg = payload.get("raw_ecg", []) or []
         timestamp = payload.get("timestamp")
+        telemetry_source = payload.get("telemetry_source", "hardware")
     except Exception as exc:
         logger.warning("Failed to parse telemetry payload for %s: %s", patient_id, exc)
         return
+
+    if telemetry_source != "simulator":
+        note_real_telemetry()
 
     vitals_flag = _determine_vitals_flag(spo2, bpm, temp)
     raw_ecg_array = _normalize_ecg_window(raw_ecg)
@@ -221,6 +235,7 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
             "summary": None,
             "recommended_action": None,
             "assessment_source": None,
+            "telemetry_source": telemetry_source,
             "room": payload.get("room"),
             "bed_number": payload.get("bed_number"),
         }
@@ -307,6 +322,7 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
         "summary": assessment["summary"],
         "recommended_action": assessment["recommended_action"],
         "assessment_source": assessment_source,
+        "telemetry_source": telemetry_source,
     }
 
     try:

@@ -4,6 +4,11 @@ const STATUS_CONFIG = {
     color: "text-emerald-400",
     dot: "bg-emerald-400",
   },
+  demo: {
+    label: "DEMO DATA",
+    color: "text-amber-300",
+    dot: "bg-amber-400 animate-pulse",
+  },
   connecting: {
     label: "CONNECTING",
     color: "text-amber-400",
@@ -16,8 +21,9 @@ const STATUS_CONFIG = {
   },
 };
 
-export default function ConnectionBadge({ status = "offline" }) {
-  const config = STATUS_CONFIG[status] || STATUS_CONFIG.offline;
+export default function ConnectionBadge({ status = "offline", demoMode = false }) {
+  const effectiveStatus = demoMode && status === "live" ? "demo" : status;
+  const config = STATUS_CONFIG[effectiveStatus] || STATUS_CONFIG.offline;
 
   return (
     <div className={`flex items-center gap-2 text-xs font-bold tracking-widest ${config.color}`}>
