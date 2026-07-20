@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import EcgWaveform from "./components/EcgWaveform.jsx";
 import AlarmBanner from "./components/AlarmBanner.jsx";
 import ConnectionBadge from "./components/ConnectionBadge.jsx";
+import ClinicalAssessment from "./components/ClinicalAssessment.jsx";
 import { getPatient } from "./patients.js";
 
 const NO_SIGNAL = "— — —";
@@ -43,6 +44,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
   const [summaryText, setSummaryText] = useState(null);
   const [recommendedAction, setRecommendedAction] = useState(null);
   const [severityTag, setSeverityTag] = useState(null);
+  const [confidence, setConfidence] = useState(null);
   const [systemFlags, setSystemFlags] = useState(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -71,6 +73,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
       setSummaryText(null);
       setRecommendedAction(null);
       setSeverityTag(null);
+      setConfidence(null);
       setSystemFlags(null);
       setRawEcg(null);
       return;
@@ -85,6 +88,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
     setSummaryText(liveEvent.summary ?? null);
     setRecommendedAction(liveEvent.recommended_action ?? null);
     setSeverityTag(liveEvent.severity ?? null);
+    setConfidence(liveEvent.confidence ?? null);
     setSystemFlags(liveEvent.system_flags ?? null);
     if (liveEvent.raw_ecg?.length) {
       setRawEcg(liveEvent.raw_ecg);
@@ -132,7 +136,6 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
     nibpSys != null &&
     nibpDia != null &&
     (nibpSys > 140 || nibpSys < 90 || nibpDia > 90 || nibpDia < 55);
-  const rhythmAlert = hasData && arrhythmia && !arrhythmia.toLowerCase().includes("normal");
 
   const nibpDisplay =
     !hasData || nibpSys == null || nibpDia == null ? NO_SIGNAL : `${nibpSys}/${nibpDia}`;
@@ -149,7 +152,6 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
     <div className="flex h-full flex-col bg-black font-mono text-slate-100">
       <AlarmBanner severity={hasData ? severityTag : null} systemFlags={systemFlags} />
 
-      {/* Top status bar — device chrome */}
       <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-800 bg-[#0a0a0a] px-3 py-1.5">
         <div className="flex min-w-0 items-center gap-4">
           <div className="shrink-0">
@@ -179,37 +181,21 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
         </div>
       </header>
 
-      {/* Main monitor body: waveform + vitals column */}
       <main className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <section className="flex min-h-0 min-w-0 flex-[3] flex-col border-b border-slate-800 lg:border-b-0 lg:border-r">
-          <EcgWaveform rawEcg={rawEcg} hasSignal={hasData} className="min-h-[220px] flex-1" />
+          <EcgWaveform rawEcg={rawEcg} hasSignal={hasData} className="min-h-[180px] flex-1" />
 
-          {/* Secondary strip under ECG — rhythm + clinical note */}
-          <div className="shrink-0 border-t border-slate-800 bg-[#050505] px-3 py-2">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="text-[9px] uppercase tracking-widest text-slate-600">Rhythm</div>
-                <div
-                  className={`text-base font-bold uppercase tracking-wide ${
-                    rhythmAlert ? "animate-pulse text-red-400" : "text-emerald-400"
-                  }`}
-                >
-                  {hasData && arrhythmia ? arrhythmia : NO_SIGNAL}
-                </div>
-              </div>
-              {(summaryText || recommendedAction) && hasData && (
-                <div className="max-w-xl flex-1 text-right">
-                  {summaryText && <p className="text-xs leading-snug text-slate-400">{summaryText}</p>}
-                  {recommendedAction && (
-                    <p className="mt-1 text-xs font-semibold text-cyan-300">{recommendedAction}</p>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+          <ClinicalAssessment
+            hasData={hasData}
+            severity={severityTag}
+            confidence={confidence}
+            rhythmStatus={arrhythmia}
+            systemFlags={systemFlags}
+            summary={summaryText}
+            recommendedAction={recommendedAction}
+          />
         </section>
 
-        {/* Right vital numerics — classic monitor column */}
         <aside className="flex w-full shrink-0 flex-col bg-[#050505] lg:w-56 xl:w-64">
           <VitalBlock
             label="HR"
