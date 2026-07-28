@@ -37,19 +37,29 @@ function ConfidenceMeter({ value, theme }) {
   );
 }
 
+function formatReadingTime(timestamp) {
+  if (!timestamp) return "—";
+  const d = new Date(typeof timestamp === "number" && timestamp < 1e12 ? timestamp : Number(timestamp));
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
 export default function ClinicalAssessment({
   hasData,
   severity,
   confidence,
   rhythmStatus,
+  ecgPrediction,
+  rhythmAnomaly,
   systemFlags,
   summary,
   recommendedAction,
   assessmentSource,
+  readingTimestamp,
   theme = "dark",
+  className = "",
 }) {
   const style = SEVERITY_STYLE[severity] || SEVERITY_STYLE.stable;
-  const rhythmAlert = hasData && rhythmStatus && !String(rhythmStatus).toLowerCase().includes("normal");
   const sourceLabel = SOURCE_LABEL[assessmentSource] || (hasData ? "ANALYSING…" : "—");
   const isLlm = assessmentSource === "llm" || assessmentSource === "llm_cached";
   const panelBg = theme === "light" ? "bg-slate-50" : "bg-[#050505]";
@@ -57,9 +67,14 @@ export default function ClinicalAssessment({
   const textMuted = theme === "light" ? "text-slate-500" : "text-slate-600";
   const textBody = theme === "light" ? "text-slate-800" : "text-slate-200";
 
+  const cnnLabel =
+    ecgPrediction ||
+    (rhythmAnomaly === true ? "Anomaly" : rhythmAnomaly === false ? "Normal" : null);
+  const cnnIsAnomaly = cnnLabel === "Anomaly" || rhythmAnomaly === true;
+
   if (!hasData) {
     return (
-      <div className={`flex min-h-[180px] items-center justify-center border-t ${borderColor} ${panelBg} px-4`}>
+      <div className={`flex min-h-[140px] items-center justify-center border-t ${borderColor} ${panelBg} px-4 ${className}`}>
         <span className={`text-sm font-bold uppercase tracking-[0.25em] ${textMuted}`}>
           Awaiting telemetry for clinical assessment
         </span>
@@ -68,11 +83,16 @@ export default function ClinicalAssessment({
   }
 
   return (
-    <div className={`flex min-h-[200px] flex-col border-t ${borderColor} ${panelBg}`}>
-      <div className={`h-1 w-full ${style.bar}`} />
+    <div className={`flex min-h-[160px] flex-col overflow-y-auto border-t ${borderColor} ${panelBg} ${className}`}>
+      <div className={`h-1 w-full shrink-0 ${style.bar}`} />
 
-      <div className="flex flex-1 flex-col gap-4 px-4 py-3 lg:flex-row">
-        <div className="flex shrink-0 flex-col gap-2 lg:w-52">
+      <div className="flex flex-1 flex-col gap-3 px-3 py-2 lg:flex-row lg:gap-4 lg:px-4 lg:py-3">
+        <div className="flex shrink-0 flex-col gap-2 lg:w-56">
+          <div className="flex items-center justify-between gap-2">
+            <div className={`text-[10px] font-bold uppercase tracking-widest ${textMuted}`}>This Reading</div>
+            <span className={`tabular-nums text-[10px] ${textMuted}`}>{formatReadingTime(readingTimestamp)}</span>
+          </div>
+
           <div className="flex items-center justify-between gap-2">
             <div className={`text-[10px] font-bold uppercase tracking-widest ${textMuted}`}>Clinical Status</div>
             <span
@@ -85,45 +105,61 @@ export default function ClinicalAssessment({
               {sourceLabel}
             </span>
           </div>
-          <div className={`inline-flex w-fit border px-3 py-1.5 text-base font-bold tracking-widest ${style.badge}`}>
+
+          <div className={`inline-flex w-fit border px-3 py-1.5 text-sm font-bold tracking-widest ${style.badge}`}>
             {style.label}
           </div>
-          <div className="space-y-2 text-xs">
+
+          <div className="space-y-1.5 text-xs">
             <div className="flex items-center justify-between gap-3">
-              <span className={`uppercase tracking-wider ${textMuted}`}>Confidence</span>
-              <ConfidenceMeter value={confidence} theme={theme} />
+              <span className={`uppercase tracking-wider ${textMuted}`}>ECG CNN</span>
+              <span
+                className={`rounded px-2 py-0.5 font-bold uppercase ${
+                  cnnIsAnomaly
+                    ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400"
+                    : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
+                }`}
+              >
+                {cnnLabel || "—"}
+              </span>
             </div>
             <div className="flex items-center justify-between gap-3">
-              <span className={`uppercase tracking-wider ${textMuted}`}>CNN Rhythm</span>
-              <span className={`font-bold uppercase ${rhythmAlert ? "text-red-500" : "text-emerald-500"}`}>
-                {rhythmStatus || "—"}
-              </span>
+              <span className={`uppercase tracking-wider ${textMuted}`}>Rhythm</span>
+              <span className={`text-right font-bold uppercase ${textMuted}`}>{rhythmStatus || "—"}</span>
             </div>
             <div className="flex items-center justify-between gap-3">
               <span className={`uppercase tracking-wider ${textMuted}`}>Vitals Flag</span>
               <span
                 className={`font-bold uppercase ${
-                  systemFlags && systemFlags !== "Stable" ? "text-amber-600" : textMuted
+                  systemFlags && systemFlags !== "Stable" ? "text-amber-600 dark:text-amber-400" : textMuted
                 }`}
               >
-                {systemFlags || "—"}
+                {systemFlags || "Stable"}
               </span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className={`uppercase tracking-wider ${textMuted}`}>AI Confidence</span>
+              <ConfidenceMeter value={confidence} theme={theme} />
             </div>
           </div>
         </div>
 
-        <div className={`flex min-w-0 flex-1 flex-col gap-3 border-t pt-3 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0 ${borderColor}`}>
+        <div className={`flex min-w-0 flex-1 flex-col gap-2 border-t pt-2 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0 ${borderColor}`}>
           <div
-            className={`rounded-lg border p-3 ${
+            className={`rounded-lg border p-2.5 ${
               isLlm
                 ? "border-violet-300 bg-violet-50 dark:border-violet-800 dark:bg-violet-950/30"
                 : `${borderColor} ${theme === "light" ? "bg-white" : "bg-black/40"}`
             }`}
           >
-            <div className={`mb-2 text-[10px] font-bold uppercase tracking-widest ${isLlm ? "text-violet-700 dark:text-violet-300" : textMuted}`}>
-              AI Clinical Interpretation
+            <div
+              className={`mb-1.5 text-[10px] font-bold uppercase tracking-widest ${
+                isLlm ? "text-violet-700 dark:text-violet-300" : textMuted
+              }`}
+            >
+              AI Interpretation (this reading)
             </div>
-            <p className={`text-base leading-relaxed ${textBody}`}>
+            <p className={`text-sm leading-relaxed ${textBody}`}>
               {summary || "Analysis in progress — interpretation will appear shortly."}
             </p>
           </div>
@@ -131,7 +167,7 @@ export default function ClinicalAssessment({
             <div className={`mb-1 text-[10px] font-bold uppercase tracking-widest ${textMuted}`}>
               Recommended Action
             </div>
-            <p className="rounded-lg border border-cyan-300 bg-cyan-50 px-3 py-2.5 text-sm font-semibold leading-relaxed text-cyan-900 dark:border-cyan-900/50 dark:bg-cyan-950/20 dark:text-cyan-200">
+            <p className="rounded-lg border border-cyan-300 bg-cyan-50 px-2.5 py-2 text-xs font-semibold leading-relaxed text-cyan-900 dark:border-cyan-900/50 dark:bg-cyan-950/20 dark:text-cyan-200">
               {recommendedAction || "Continue routine bedside monitoring."}
             </p>
           </div>

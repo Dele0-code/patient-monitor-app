@@ -28,6 +28,8 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
   const [severityTag, setSeverityTag] = useState(null);
   const [confidence, setConfidence] = useState(null);
   const [assessmentSource, setAssessmentSource] = useState(null);
+  const [ecgPrediction, setEcgPrediction] = useState(null);
+  const [rhythmAnomaly, setRhythmAnomaly] = useState(null);
   const [systemFlags, setSystemFlags] = useState(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -68,6 +70,8 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
       setSeverityTag(null);
       setConfidence(null);
       setAssessmentSource(null);
+      setEcgPrediction(null);
+      setRhythmAnomaly(null);
       setSystemFlags(null);
       setRawEcg(null);
       return;
@@ -84,6 +88,8 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
     if (liveEvent.severity) setSeverityTag(liveEvent.severity);
     if (liveEvent.confidence != null) setConfidence(liveEvent.confidence);
     if (liveEvent.assessment_source) setAssessmentSource(liveEvent.assessment_source);
+    if (liveEvent.ecg_prediction) setEcgPrediction(liveEvent.ecg_prediction);
+    if (liveEvent.rhythm_anomaly != null) setRhythmAnomaly(liveEvent.rhythm_anomaly);
     if (liveEvent.system_flags) setSystemFlags(liveEvent.system_flags);
     if (liveEvent.raw_ecg?.length) setRawEcg(liveEvent.raw_ecg);
   }, [connectionStatus, liveEvent]);
@@ -252,23 +258,27 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
       </header>
 
       <main className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <section className={`flex min-h-0 min-w-0 flex-[3] flex-col border-b lg:border-b-0 lg:border-r ${borderColor}`}>
-          <EcgWaveform rawEcg={rawEcg} hasSignal={hasData} theme={theme} className="min-h-[180px] flex-1" />
+        <section className={`flex min-h-0 min-w-0 flex-[2] flex-col border-b lg:flex-[3] lg:border-b-0 lg:border-r ${borderColor}`}>
+          <EcgWaveform rawEcg={rawEcg} hasSignal={hasData} className="h-[120px] shrink-0 sm:h-[140px]" />
 
           <ClinicalAssessment
             hasData={hasData}
             severity={latchedAlert?.severity || severityTag}
             confidence={confidence}
             rhythmStatus={arrhythmia}
+            ecgPrediction={ecgPrediction}
+            rhythmAnomaly={rhythmAnomaly}
             systemFlags={systemFlags}
             summary={summaryText}
             recommendedAction={recommendedAction}
             assessmentSource={assessmentSource}
+            readingTimestamp={liveEvent?.timestamp}
             theme={theme}
+            className="min-h-0 flex-1"
           />
         </section>
 
-        <aside className={`grid w-full shrink-0 grid-cols-2 gap-0 lg:flex lg:w-52 lg:flex-col xl:w-60 ${asideBg}`}>
+        <aside className={`grid w-full shrink-0 grid-cols-2 gap-0 lg:flex lg:w-56 lg:flex-col xl:w-64 ${asideBg}`}>
           <VitalGauge
             label="HR"
             value={hasData ? heartRate : null}

@@ -5,6 +5,8 @@ const GRID_FINE = "rgba(0, 180, 80, 0.12)";
 const GRID_BOLD = "rgba(0, 180, 80, 0.28)";
 const BG_COLOR = "#000000";
 const ERASE_GAP = 14;
+const ADC_BASELINE = 2048;
+const SAMPLE_RATE_HZ = 100;
 
 function drawGrid(ctx, width, height) {
   ctx.fillStyle = BG_COLOR;
@@ -43,13 +45,12 @@ function drawGrid(ctx, width, height) {
   }
 }
 
-function normalizeSamples(samples) {
-  if (!samples?.length) return [];
-  const values = samples.map((v) => Number(v));
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = Math.max(max - min, 1);
-  return values.map((v) => (v - (min + max) / 2) / range);
+/** Map ESP32 ADC counts to canvas Y — fixed baseline, no per-batch min-max. */
+function sampleToY(value, baselineY, height) {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return baselineY;
+  const gain = height * 0.00085;
+  return baselineY - (v - ADC_BASELINE) * gain;
 }
 
 export default function EcgWaveform({ rawEcg = null, hasSignal = false, className = "" }) {
@@ -57,15 +58,31 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
   const sampleQueueRef = useRef([]);
   const lastYRef = useRef(0);
   const sweepXRef = useRef(0);
+  const lastBatchKeyRef = useRef(null);
 
   useEffect(() => {
     if (!hasSignal || !rawEcg?.length) return;
-    const normalized = normalizeSamples(rawEcg);
-    sampleQueueRef.current.push(...normalized);
-    if (sampleQueueRef.current.length > 3000) {
-      sampleQueueRef.current = sampleQueueRef.current.slice(-2000);
+
+    const batchKey = rawEcg.join(",");
+    if (batchKey === lastBatchKeyRef.current) return;
+    lastBatchKeyRef.current = batchKey;
+
+    for (let i = 0; i < rawEcg.length; i += 1) {
+      sampleQueueRef.current.push(Number(rawEcg[i]));
+    }
+
+    const maxQueue = SAMPLE_RATE_HZ * 3;
+    if (sampleQueueRef.current.length > maxQueue) {
+      sampleQueueRef.current = sampleQueueRef.current.slice(-maxQueue);
     }
   }, [rawEcg, hasSignal]);
+
+  useEffect(() => {
+    if (!hasSignal) {
+      sampleQueueRef.current = [];
+      lastBatchKeyRef.current = null;
+    }
+  }, [hasSignal]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -159,19 +176,17 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
         sweepXRef.current = 0;
         lastYRef.current = baselineY;
       } else {
-        // Match ~100 incoming samples/sec (1 MQTT packet/sec with 100 points)
-        const samplesPerSecond = 28;
-        const pixelsPerSample = Math.max(1.5, width / 250);
-        const samplesToDraw = Math.max(1, Math.floor(dt * samplesPerSecond));
+        const pixelsPerSample = Math.max(1.2, width / 300);
+        const samplesToDraw = Math.max(1, Math.floor(dt * SAMPLE_RATE_HZ));
 
         for (let i = 0; i < samplesToDraw; i += 1) {
-          const sample = sampleQueueRef.current.shift();
-          if (sample === undefined) break;
+          const adcValue = sampleQueueRef.current.shift();
+          if (adcValue === undefined) break;
 
           let x1 = sweepXRef.current;
           let x2 = x1 + pixelsPerSample;
           const y1 = lastYRef.current;
-          const y2 = baselineY - sample * (height * 0.42);
+          const y2 = sampleToY(adcValue, baselineY, height);
 
           if (x2 >= width) {
             x2 = width - 1;

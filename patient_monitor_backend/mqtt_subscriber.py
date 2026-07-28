@@ -263,6 +263,8 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
             logger.warning("ECG inference failed for %s: %s", patient_id, exc)
             rhythm_status = "ECG analysis unavailable"
 
+    ecg_prediction = "Anomaly" if rhythm_anomaly else "Normal"
+
     patient_history[patient_id].append(
         {
             "timestamp": timestamp,
@@ -285,11 +287,12 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
         }
     )
 
-    # Push vitals + ECG immediately so the UI keeps updating during slow LLM calls.
+    # Push vitals + ECG + CNN result immediately so the UI updates every reading.
     cached = _last_llm_assessment.get(patient_id)
-    quick_assessment = cached or _rule_based_assessment(
+    fresh_rules = _rule_based_assessment(
         spo2, bpm, temp, rhythm_status, vitals_flag, rhythm_anomaly
     )
+    quick_assessment = cached or fresh_rules
     quick_source = "llm_cached" if cached else "rules"
 
     await ws_manager.broadcast(
@@ -305,8 +308,10 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
             "nibp_dia": payload.get("nibp_dia"),
             "raw_ecg": raw_ecg_array,
             "rhythm_status": rhythm_status,
+            "rhythm_anomaly": rhythm_anomaly,
+            "ecg_prediction": ecg_prediction,
             "system_flags": vitals_flag,
-            "severity": quick_assessment["severity"],
+            "severity": fresh_rules["severity"],
             "confidence": quick_assessment["confidence"],
             "summary": quick_assessment["summary"],
             "recommended_action": quick_assessment["recommended_action"],
@@ -395,6 +400,8 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
         "nibp_dia": payload.get("nibp_dia"),
         "raw_ecg": raw_ecg_array,
         "rhythm_status": rhythm_status,
+        "rhythm_anomaly": rhythm_anomaly,
+        "ecg_prediction": ecg_prediction,
         "system_flags": vitals_flag,
         "severity": assessment["severity"],
         "confidence": assessment["confidence"],

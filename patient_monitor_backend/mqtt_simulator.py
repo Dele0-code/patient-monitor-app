@@ -1,8 +1,8 @@
 """
 Publishes ESP32-compatible telemetry over MQTT for development and demos.
 
-When SIMULATE_ESP32=true the backend starts this automatically on boot.
-Disable it when the real ESP32 is online — no other changes needed.
+Alternates between stable and abnormal phases so the dashboard clearly shows
+good readings vs clinically concerning ones.
 """
 
 import json
@@ -29,20 +29,31 @@ logger = logging.getLogger("patient_monitor.mqtt_simulator")
 SEQUENCE_LEN = 100
 ECG_BASELINE = 2048.0
 
-# Slowly drifting baseline vitals — clinically stable unless a rare sustained event fires.
-_vital_state: dict[str, float | int | None] = {
+STABLE_PHASE_SEC = 40
+ABNORMAL_PHASE_SEC = 25
+
+_phase = {
+    "mode": "stable",
+    "tick": 0,
+    "problem": "tachycardia",
+    "problems": ["tachycardia", "hypoxemia", "bradycardia", "fever"],
+    "problem_index": 0,
+}
+
+_vital_state: dict[str, float] = {
     "spo2": 98.0,
     "bpm": 74.0,
     "temp": 36.6,
-    "event": None,
-    "event_ticks": 0,
 }
 
 
-def _synthetic_ecg_sample(t: float, bpm: float) -> float:
+def _synthetic_ecg_sample(t: float, bpm: float, abnormal: bool = False) -> float:
     beat_duration = 60.0 / max(bpm, 40)
     beat_time = t % beat_duration
     ratio = beat_time / beat_duration
+
+    if abnormal and 0.35 <= ratio < 0.42:
+        return 1.8 * math.sin(math.pi * (ratio - 0.35) / 0.07)
 
     if 0.02 <= ratio < 0.10:
         return 0.12 * math.sin(math.pi * (ratio - 0.02) / 0.08)
@@ -57,66 +68,77 @@ def _synthetic_ecg_sample(t: float, bpm: float) -> float:
     return 0.0
 
 
-def generate_esp32_ecg(bpm: float = 76.0) -> list[float]:
+def generate_esp32_ecg(bpm: float = 76.0, abnormal: bool = False) -> list[float]:
     samples: list[float] = []
     for i in range(SEQUENCE_LEN):
         t = i / 100.0
-        voltage = _synthetic_ecg_sample(t, bpm)
-        noise = random.uniform(-4, 4)
+        voltage = _synthetic_ecg_sample(t, bpm, abnormal=abnormal)
+        noise = random.uniform(-6, 6) if abnormal else random.uniform(-3, 3)
+        if abnormal and random.random() < 0.08:
+            voltage += random.uniform(0.6, 1.2)
         samples.append(round(ECG_BASELINE + voltage * 180 + noise, 2))
     return samples
 
 
-def _nudge(current: float, target: float, max_step: float = 0.4) -> float:
+def _nudge(current: float, target: float, max_step: float = 0.5) -> float:
     diff = target - current
     if abs(diff) <= max_step:
         return target
     return current + max_step * (1 if diff > 0 else -1)
 
 
-def generate_vitals() -> dict[str, float | int]:
-    """Gradual vitals drift with rare, sustained clinical events (not random spikes)."""
+def _advance_phase() -> str:
+    global _phase
+    _phase["tick"] += 1
+    elapsed = _phase["tick"] * SIMULATOR_RATE_SEC
+
+    if _phase["mode"] == "stable" and elapsed >= STABLE_PHASE_SEC:
+        _phase["mode"] = "abnormal"
+        _phase["tick"] = 0
+        _phase["problem"] = _phase["problems"][_phase["problem_index"] % len(_phase["problems"])]
+        _phase["problem_index"] += 1
+        logger.info("Simulator entering ABNORMAL phase: %s", _phase["problem"])
+    elif _phase["mode"] == "abnormal" and elapsed >= ABNORMAL_PHASE_SEC:
+        _phase["mode"] = "stable"
+        _phase["tick"] = 0
+        logger.info("Simulator returning to STABLE phase")
+
+    return _phase["mode"]
+
+
+def generate_vitals(mode: str) -> dict[str, float | int]:
     global _vital_state
 
-    # Rare new event (~0.3% per tick ≈ once every ~5 min at 1 Hz)
-    if _vital_state["event"] is None and random.random() < 0.003:
-        _vital_state["event"] = random.choice(["bradycardia", "tachycardia", "hypoxemia"])
-        _vital_state["event_ticks"] = 0
-
-    event = _vital_state["event"]
-    if event:
-        _vital_state["event_ticks"] = int(_vital_state["event_ticks"]) + 1
-        if event == "bradycardia":
-            target_bpm, target_spo2, target_temp = 52.0, 97.0, 36.5
-        elif event == "tachycardia":
-            target_bpm, target_spo2, target_temp = 118.0, 96.0, 36.8
-        else:
-            target_bpm, target_spo2, target_temp = 78.0, 89.0, 36.7
-        # Hold event for at least 45 seconds, max 90 seconds
-        if int(_vital_state["event_ticks"]) > 90 or (
-            int(_vital_state["event_ticks"]) > 45 and random.random() < 0.05
-        ):
-            _vital_state["event"] = None
-            _vital_state["event_ticks"] = 0
-            target_bpm, target_spo2, target_temp = 74.0, 98.0, 36.6
-    else:
+    if mode == "stable":
         target_bpm = 72.0 + random.uniform(-2, 2)
         target_spo2 = 98.0 + random.uniform(-0.5, 0.5)
-        target_temp = 36.6 + random.uniform(-0.1, 0.1)
+        target_temp = 36.6 + random.uniform(-0.08, 0.08)
+    else:
+        problem = _phase["problem"]
+        if problem == "tachycardia":
+            target_bpm, target_spo2, target_temp = 118.0, 96.0, 36.8
+        elif problem == "bradycardia":
+            target_bpm, target_spo2, target_temp = 48.0, 97.0, 36.4
+        elif problem == "hypoxemia":
+            target_bpm, target_spo2, target_temp = 88.0, 87.0, 36.7
+        else:
+            target_bpm, target_spo2, target_temp = 82.0, 97.0, 38.6
 
-    _vital_state["bpm"] = _nudge(float(_vital_state["bpm"]), target_bpm, 0.6)
-    _vital_state["spo2"] = _nudge(float(_vital_state["spo2"]), target_spo2, 0.3)
-    _vital_state["temp"] = round(_nudge(float(_vital_state["temp"]), target_temp, 0.05), 1)
+    _vital_state["bpm"] = _nudge(_vital_state["bpm"], target_bpm, 0.8)
+    _vital_state["spo2"] = _nudge(_vital_state["spo2"], target_spo2, 0.4)
+    _vital_state["temp"] = round(_nudge(_vital_state["temp"], target_temp, 0.06), 1)
 
     return {
-        "spo2": int(round(float(_vital_state["spo2"]))),
-        "max_bpm": int(round(float(_vital_state["bpm"]))),
+        "spo2": int(round(_vital_state["spo2"])),
+        "max_bpm": int(round(_vital_state["bpm"])),
         "temperature_c": float(_vital_state["temp"]),
     }
 
 
 def build_payload(patient_id: str) -> dict[str, Any]:
-    vitals = generate_vitals()
+    mode = _advance_phase()
+    abnormal = mode == "abnormal"
+    vitals = generate_vitals(mode)
     bpm = float(vitals["max_bpm"])
     return {
         "patient_id": patient_id,
@@ -129,8 +151,10 @@ def build_payload(patient_id: str) -> dict[str, Any]:
         "room": "ICU",
         "bed_number": "B",
         "full_name": "Adedayo Segun",
-        "raw_ecg": generate_esp32_ecg(bpm),
-        "telemetry_source": "hardware",
+        "raw_ecg": generate_esp32_ecg(bpm, abnormal=abnormal),
+        "telemetry_source": "simulator",
+        "simulator_phase": mode,
+        "simulator_problem": _phase["problem"] if abnormal else None,
     }
 
 
@@ -147,10 +171,9 @@ async def start_simulator(stop_event, local_stop: asyncio.Event | None = None) -
 
     client.loop_start()
     logger.info(
-        "ESP32 simulator publishing to '%s' every %.1fs (patient %s)",
+        "ESP32 simulator publishing to '%s' every %.1fs — alternating stable/abnormal phases",
         topic,
         SIMULATOR_RATE_SEC,
-        patient_id,
     )
 
     try:
