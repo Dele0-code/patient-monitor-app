@@ -57,6 +57,7 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
   const peakRef = useRef(60);
   const lastYRef = useRef(0);
   const sweepXRef = useRef(0);
+  const lastBatchKeyRef = useRef(null);
 
   // Feed raw samples straight into the queue; calibration happens at draw time.
   useEffect(() => {
@@ -67,6 +68,13 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
     const maxLen = SAMPLE_RATE_HZ * 4;
     if (q.length > maxLen) q.splice(0, q.length - maxLen);
   }, [rawEcg, hasSignal]);
+
+  useEffect(() => {
+    if (!hasSignal) {
+      queueRef.current = [];
+      lastBatchKeyRef.current = null;
+    }
+  }, [hasSignal]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -152,7 +160,6 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
       for (let i = 0; i < toDraw; i += 1) {
         const raw = q.shift();
         if (raw === undefined) break;
-
         const norm = calibrate(raw);
         let x1 = sweepXRef.current;
         let x2 = x1 + pxPerSample;

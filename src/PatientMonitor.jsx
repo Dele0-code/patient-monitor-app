@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import EcgWaveform from "./components/EcgWaveform.jsx";
 import AlarmBanner from "./components/AlarmBanner.jsx";
 import AlertDetailPanel from "./components/AlertDetailPanel.jsx";
@@ -7,12 +7,9 @@ import ClinicalAssessment from "./components/ClinicalAssessment.jsx";
 import VitalGauge from "./components/VitalGauge.jsx";
 import { useTheme } from "./context/ThemeContext.jsx";
 import { getPatient } from "./patients.js";
-import { playAlarm, setMuted, unlockAudio, ALARM_PERIOD_MS } from "./alarm.js";
 
+const NO_SIGNAL = "— — —";
 const ALERT_HOLD_MS = 60000;
-// If we have had telemetry but no packet arrives for this long, treat the feed as lost
-// and raise a technical (signal-loss) alarm. Packets normally arrive ~1 Hz.
-const DATA_STALL_MS = 8000;
 
 export default function PatientMonitor({ patientId, liveEvent, connectionStatus }) {
   const { theme, toggleTheme } = useTheme();
@@ -31,16 +28,16 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
   const [severityTag, setSeverityTag] = useState(null);
   const [confidence, setConfidence] = useState(null);
   const [assessmentSource, setAssessmentSource] = useState(null);
+  const [ecgPrediction, setEcgPrediction] = useState(null);
+  const [rhythmAnomaly, setRhythmAnomaly] = useState(null);
   const [systemFlags, setSystemFlags] = useState(null);
-  const [trend, setTrend] = useState(null);
-  const [monitoringFocus, setMonitoringFocus] = useState(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [rawEcg, setRawEcg] = useState(null);
   const [latchedAlert, setLatchedAlert] = useState(null);
-  const [signalLost, setSignalLost] = useState(false);
 
-  const lastPacketAtRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const audioEnabledRef = useRef(audioEnabled);
 
   const isDark = theme === "dark";
   const shell = isDark ? "bg-black text-slate-100" : "bg-slate-100 text-slate-900";
@@ -50,21 +47,9 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
   const labelMuted = isDark ? "text-slate-600" : "text-slate-500";
   const accent = isDark ? "text-emerald-400" : "text-emerald-600";
 
-  // Route the Mute button through the shared alarm engine (single-point mute).
   useEffect(() => {
-    setMuted(!audioEnabled);
+    audioEnabledRef.current = audioEnabled;
   }, [audioEnabled]);
-
-  // Browsers keep the AudioContext suspended until a user gesture — unlock on first interaction.
-  useEffect(() => {
-    const unlock = () => unlockAudio();
-    window.addEventListener("pointerdown", unlock);
-    window.addEventListener("keydown", unlock);
-    return () => {
-      window.removeEventListener("pointerdown", unlock);
-      window.removeEventListener("keydown", unlock);
-    };
-  }, []);
 
   useEffect(() => {
     const clock = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -85,6 +70,8 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
       setSeverityTag(null);
       setConfidence(null);
       setAssessmentSource(null);
+      setEcgPrediction(null);
+      setRhythmAnomaly(null);
       setSystemFlags(null);
       setRawEcg(null);
       return;
@@ -101,28 +88,44 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
     if (liveEvent.severity) setSeverityTag(liveEvent.severity);
     if (liveEvent.confidence != null) setConfidence(liveEvent.confidence);
     if (liveEvent.assessment_source) setAssessmentSource(liveEvent.assessment_source);
+    if (liveEvent.ecg_prediction) setEcgPrediction(liveEvent.ecg_prediction);
+    if (liveEvent.rhythm_anomaly != null) setRhythmAnomaly(liveEvent.rhythm_anomaly);
     if (liveEvent.system_flags) setSystemFlags(liveEvent.system_flags);
-    if (liveEvent.trend) setTrend(liveEvent.trend);
-    if (liveEvent.monitoring_focus) setMonitoringFocus(liveEvent.monitoring_focus);
     if (liveEvent.raw_ecg?.length) setRawEcg(liveEvent.raw_ecg);
-
-    // A fresh packet arrived — remember when, and clear any signal-loss alarm.
-    lastPacketAtRef.current = Date.now();
-    setSignalLost(false);
   }, [connectionStatus, liveEvent]);
 
-  // Data-loss watchdog: once we've received telemetry, raise a technical alarm if the
-  // feed goes quiet (no packets for DATA_STALL_MS) or the socket drops entirely.
+  const triggerBeep = useCallback((freq, duration, volume = 0.05) => {
+    if (!audioEnabledRef.current) return;
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!audioCtxRef.current && AudioContext) audioCtxRef.current = new AudioContext();
+      const ctx = audioCtxRef.current;
+      if (!ctx || ctx.state === "suspended") return;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+      gain.gain.setValueAtTime(volume, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + duration);
+    } catch {
+      // Audio unavailable on kiosk
+    }
+  }, []);
+
   useEffect(() => {
-    const check = setInterval(() => {
-      const last = lastPacketAtRef.current;
-      if (last == null) return; // never had data yet — nothing to lose
-      const stalled = Date.now() - last > DATA_STALL_MS;
-      const dropped = connectionStatus === "offline";
-      setSignalLost(stalled || dropped);
-    }, 1000);
-    return () => clearInterval(check);
-  }, [connectionStatus]);
+    if (!hasData || severityTag !== "critical") return undefined;
+    const activeSeverity = latchedAlert?.severity === "critical" ? "critical" : severityTag;
+    if (activeSeverity !== "critical") return undefined;
+    const interval = setInterval(() => {
+      triggerBeep(880, 0.1, 0.08);
+      setTimeout(() => triggerBeep(880, 0.1, 0.08), 150);
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [hasData, severityTag, latchedAlert, triggerBeep]);
 
   const hrAlertInstant = hasData && heartRate != null && (heartRate > 110 || heartRate < 52);
   const spo2AlertInstant = hasData && spo2 != null && spo2 < 92;
@@ -196,25 +199,6 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
     tempAlertInstant || Boolean(latchedAlert?.messages.some((m) => /pyrexia|hypothermia|°C/i.test(m)));
   const nibpAlert = nibpAlertInstant;
 
-  // Which audible alarm should be sounding right now. Priority: technical signal-loss
-  // (something is wrong with the monitor itself) > critical patient alarm > watch.
-  const activeSeverity = latchedAlert?.severity || severityTag;
-  const alarmKind = signalLost
-    ? "signal-loss"
-    : hasData && activeSeverity === "critical"
-    ? "critical"
-    : hasData && activeSeverity === "watch"
-    ? "watch"
-    : null;
-
-  useEffect(() => {
-    if (!alarmKind) return undefined;
-    playAlarm(alarmKind); // sound immediately, then repeat on the kind's cadence
-    const period = ALARM_PERIOD_MS[alarmKind] || 1500;
-    const interval = setInterval(() => playAlarm(alarmKind), period);
-    return () => clearInterval(interval);
-  }, [alarmKind]);
-
   const nibpGaugeValue = hasData && nibpSys != null ? nibpSys : null;
   const nibpDisplay = !hasData || nibpSys == null || nibpDia == null ? null : `${nibpSys}/${nibpDia}`;
 
@@ -230,7 +214,6 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
         severity={hasData ? severityTag : null}
         systemFlags={systemFlags}
         latchedSeverity={latchedAlert?.severity}
-        signalLost={signalLost}
       />
       <AlertDetailPanel alert={latchedAlert} theme={theme} />
 
@@ -275,30 +258,27 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
       </header>
 
       <main className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <section className={`flex min-h-0 min-w-0 flex-[3] flex-col border-b lg:border-b-0 lg:border-r ${borderColor}`}>
-          <EcgWaveform
-            rawEcg={rawEcg}
-            hasSignal={hasData}
-            theme={theme}
-            className="h-[32vh] max-h-[330px] min-h-[160px] shrink-0"
-          />
+        <section className={`flex min-h-0 min-w-0 flex-[2] flex-col border-b lg:flex-[3] lg:border-b-0 lg:border-r ${borderColor}`}>
+          <EcgWaveform rawEcg={rawEcg} hasSignal={hasData} className="h-[120px] shrink-0 sm:h-[140px]" />
 
           <ClinicalAssessment
             hasData={hasData}
             severity={latchedAlert?.severity || severityTag}
             confidence={confidence}
             rhythmStatus={arrhythmia}
+            ecgPrediction={ecgPrediction}
+            rhythmAnomaly={rhythmAnomaly}
             systemFlags={systemFlags}
             summary={summaryText}
             recommendedAction={recommendedAction}
             assessmentSource={assessmentSource}
-            trend={trend}
-            monitoringFocus={monitoringFocus}
+            readingTimestamp={liveEvent?.timestamp}
             theme={theme}
+            className="min-h-0 flex-1"
           />
         </section>
 
-        <aside className={`grid w-full shrink-0 grid-cols-2 gap-0 lg:flex lg:w-64 lg:flex-col xl:w-72 ${asideBg}`}>
+        <aside className={`grid w-full shrink-0 grid-cols-2 gap-0 lg:flex lg:w-56 lg:flex-col xl:w-64 ${asideBg}`}>
           <VitalGauge
             label="HR"
             value={hasData ? heartRate : null}
@@ -308,7 +288,6 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
             max={160}
             alert={hrAlert}
             strokeColor="#34d399"
-            size={128}
             theme={theme}
           />
           <VitalGauge
@@ -320,7 +299,6 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
             max={100}
             alert={spo2Alert}
             strokeColor="#38bdf8"
-            size={128}
             theme={theme}
           />
           <VitalGauge
@@ -332,7 +310,6 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
             max={180}
             alert={nibpAlert}
             strokeColor="#f9a8d4"
-            size={128}
             theme={theme}
           />
           <VitalGauge
@@ -344,7 +321,6 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
             max={40}
             alert={tempAlert}
             strokeColor="#fcd34d"
-            size={128}
             theme={theme}
           />
 
