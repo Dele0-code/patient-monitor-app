@@ -27,6 +27,7 @@ from config import (
 logger = logging.getLogger("patient_monitor.mqtt_simulator")
 
 SEQUENCE_LEN = 100
+SAMPLE_RATE_HZ = 100.0
 ECG_BASELINE = 2048.0
 
 # Slowly drifting baseline vitals — clinically stable unless a rare sustained event fires.
@@ -38,32 +39,63 @@ _vital_state: dict[str, float | int | None] = {
     "event_ticks": 0,
 }
 
+# Continuous cardiac phase (fraction of the current beat, 0..1) kept ACROSS packets so the
+# waveform never resets mid-stream — this is what makes the trace look like a real monitor
+# instead of a stuttering sawtooth.
+_ecg_phase = 0.0
+# Respiratory phase (0..1) drives two real-world effects: a slow baseline wander of the
+# isoelectric line, and respiratory sinus arrhythmia (heart speeds up on inspiration).
+_resp_phase = 0.0
+# Amplitude of the current beat — refreshed each new beat so no two QRS complexes are
+# exactly identical, mimicking real lead contact / autonomic variation.
+_beat_amp = 1.0
 
-def _synthetic_ecg_sample(t: float, bpm: float) -> float:
-    beat_duration = 60.0 / max(bpm, 40)
-    beat_time = t % beat_duration
-    ratio = beat_time / beat_duration
+RESP_RATE_HZ = 0.25          # ~15 breaths per minute
+RSA_DEPTH = 0.06             # ±6% HR modulation across the respiratory cycle
+BASELINE_WANDER_MV = 0.06    # slow drift of the baseline (in PQRST mV-ish units)
 
-    if 0.02 <= ratio < 0.10:
+
+def _pqrst(ratio: float) -> float:
+    """One normalized PQRST complex in mV-ish units, keyed on beat fraction 0..1."""
+    if 0.02 <= ratio < 0.10:      # P wave
         return 0.12 * math.sin(math.pi * (ratio - 0.02) / 0.08)
-    if 0.12 <= ratio < 0.14:
+    if 0.12 <= ratio < 0.14:      # Q dip
         return -0.15 * math.sin(math.pi * (ratio - 0.12) / 0.02)
-    if 0.14 <= ratio < 0.17:
+    if 0.14 <= ratio < 0.17:      # R spike
         return 1.25 * math.sin(math.pi * (ratio - 0.14) / 0.03)
-    if 0.17 <= ratio < 0.21:
+    if 0.17 <= ratio < 0.21:      # S dip
         return -0.35 * math.sin(math.pi * (ratio - 0.17) / 0.04)
-    if 0.24 <= ratio < 0.40:
+    if 0.24 <= ratio < 0.40:      # T wave
         return 0.25 * math.sin(math.pi * (ratio - 0.24) / 0.16)
     return 0.0
 
 
 def generate_esp32_ecg(bpm: float = 76.0) -> list[float]:
+    """One packet of SEQUENCE_LEN samples, phase-continuous with the previous packet.
+
+    Layers three realism effects on top of the clean PQRST template:
+      • Respiratory sinus arrhythmia — instantaneous HR rises on inspiration, falls on
+        expiration (a healthy heart is never perfectly metronomic).
+      • Respiratory baseline wander — the isoelectric line drifts slowly with breathing.
+      • Beat-to-beat amplitude jitter — each QRS is scaled slightly differently.
+    """
+    global _ecg_phase, _resp_phase, _beat_amp
+    resp_per_sample = RESP_RATE_HZ / SAMPLE_RATE_HZ
     samples: list[float] = []
-    for i in range(SEQUENCE_LEN):
-        t = i / 100.0
-        voltage = _synthetic_ecg_sample(t, bpm)
-        noise = random.uniform(-4, 4)
+    for _ in range(SEQUENCE_LEN):
+        resp = math.sin(2 * math.pi * _resp_phase)
+        inst_bpm = max(bpm * (1.0 + RSA_DEPTH * resp), 40.0)
+        beats_per_sample = (inst_bpm / 60.0) / SAMPLE_RATE_HZ
+
+        voltage = _pqrst(_ecg_phase) * _beat_amp + BASELINE_WANDER_MV * resp
+        noise = random.uniform(-2.5, 2.5)
         samples.append(round(ECG_BASELINE + voltage * 180 + noise, 2))
+
+        prev = _ecg_phase
+        _ecg_phase = (_ecg_phase + beats_per_sample) % 1.0
+        if _ecg_phase < prev:  # wrapped past 1.0 → a new beat is starting
+            _beat_amp = random.uniform(0.92, 1.08)
+        _resp_phase = (_resp_phase + resp_per_sample) % 1.0
     return samples
 
 
@@ -130,7 +162,7 @@ def build_payload(patient_id: str) -> dict[str, Any]:
         "bed_number": "B",
         "full_name": "Adedayo Segun",
         "raw_ecg": generate_esp32_ecg(bpm),
-        "telemetry_source": "hardware",
+        "telemetry_source": "simulator",
     }
 
 
