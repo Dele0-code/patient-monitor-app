@@ -1,61 +1,60 @@
 import { useEffect, useRef } from "react";
 
 const TRACE_COLOR = "#00e676";
-const GRID_FINE = "rgba(0, 180, 80, 0.12)";
-const GRID_BOLD = "rgba(0, 180, 80, 0.28)";
+const TRACE_GLOW = "rgba(0, 230, 118, 0.35)";
+const GRID_FINE = "rgba(0, 180, 80, 0.10)";
+const GRID_BOLD = "rgba(0, 180, 80, 0.22)";
 const BG_COLOR = "#000000";
-const ERASE_GAP = 14;
-const ADC_BASELINE = 2048;
-const SAMPLE_RATE_HZ = 100;
 
-function drawGrid(ctx, width, height) {
+// Display calibration
+const SAMPLE_RATE_HZ = 100; // incoming ECG sample rate
+const SECONDS_VISIBLE = 5; // how many seconds of trace fill the width
+const AMPLITUDE_FRAC = 0.3; // R-peak height as a fraction of panel height (smaller = flatter)
+const ERASE_GAP = 12; // px of blanking ahead of the sweep cursor
+const FINE_STEP = 10;
+const BOLD_STEP = 50;
+
+function drawGridBand(ctx, x0, x1, height) {
   ctx.fillStyle = BG_COLOR;
-  ctx.fillRect(0, 0, width, height);
-
-  const fineStep = 8;
-  const boldStep = 40;
+  ctx.fillRect(x0, 0, x1 - x0, height);
 
   ctx.strokeStyle = GRID_FINE;
   ctx.lineWidth = 1;
-  for (let x = 0; x <= width; x += fineStep) {
+  for (let x = Math.floor(x0 / FINE_STEP) * FINE_STEP; x <= x1; x += FINE_STEP) {
     ctx.beginPath();
     ctx.moveTo(x + 0.5, 0);
     ctx.lineTo(x + 0.5, height);
     ctx.stroke();
   }
-  for (let y = 0; y <= height; y += fineStep) {
+  for (let y = 0; y <= height; y += FINE_STEP) {
     ctx.beginPath();
-    ctx.moveTo(0, y + 0.5);
-    ctx.lineTo(width, y + 0.5);
+    ctx.moveTo(x0, y + 0.5);
+    ctx.lineTo(x1, y + 0.5);
     ctx.stroke();
   }
 
   ctx.strokeStyle = GRID_BOLD;
-  for (let x = 0; x <= width; x += boldStep) {
+  for (let x = Math.floor(x0 / BOLD_STEP) * BOLD_STEP; x <= x1; x += BOLD_STEP) {
     ctx.beginPath();
     ctx.moveTo(x + 0.5, 0);
     ctx.lineTo(x + 0.5, height);
     ctx.stroke();
   }
-  for (let y = 0; y <= height; y += boldStep) {
+  for (let y = 0; y <= height; y += BOLD_STEP) {
     ctx.beginPath();
-    ctx.moveTo(0, y + 0.5);
-    ctx.lineTo(width, y + 0.5);
+    ctx.moveTo(x0, y + 0.5);
+    ctx.lineTo(x1, y + 0.5);
     ctx.stroke();
   }
 }
 
-/** Map ESP32 ADC counts to canvas Y — fixed baseline, no per-batch min-max. */
-function sampleToY(value, baselineY, height) {
-  const v = Number(value);
-  if (!Number.isFinite(v)) return baselineY;
-  const gain = height * 0.0016;
-  return baselineY - (v - ADC_BASELINE) * gain;
-}
-
 export default function EcgWaveform({ rawEcg = null, hasSignal = false, className = "" }) {
   const canvasRef = useRef(null);
-  const sampleQueueRef = useRef([]);
+  const queueRef = useRef([]);
+  // Adaptive calibration kept ACROSS packets so the baseline stays flat and the gain
+  // stays consistent — no more per-packet rescaling that made the trace jump around.
+  const baselineRef = useRef(null);
+  const peakRef = useRef(60);
   const lastYRef = useRef(0);
   const sweepXRef = useRef(0);
   const lastBatchKeyRef = useRef(null);
@@ -68,26 +67,19 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
   // seam between two batches (delivery is 100 samples/s == consumption rate).
   const primedRef = useRef(false);
 
+  // Feed raw samples straight into the queue; calibration happens at draw time.
   useEffect(() => {
     if (!hasSignal || !rawEcg?.length) return;
-
-    const batchKey = rawEcg.join(",");
-    if (batchKey === lastBatchKeyRef.current) return;
-    lastBatchKeyRef.current = batchKey;
-
-    for (let i = 0; i < rawEcg.length; i += 1) {
-      sampleQueueRef.current.push(Number(rawEcg[i]));
-    }
-
-    const maxQueue = SAMPLE_RATE_HZ * 3;
-    if (sampleQueueRef.current.length > maxQueue) {
-      sampleQueueRef.current = sampleQueueRef.current.slice(-maxQueue);
-    }
+    const q = queueRef.current;
+    for (const v of rawEcg) q.push(Number(v));
+    // keep at most ~4s of backlog so we never drift far from real-time
+    const maxLen = SAMPLE_RATE_HZ * 4;
+    if (q.length > maxLen) q.splice(0, q.length - maxLen);
   }, [rawEcg, hasSignal]);
 
   useEffect(() => {
     if (!hasSignal) {
-      sampleQueueRef.current = [];
+      queueRef.current = [];
       lastBatchKeyRef.current = null;
       primedRef.current = false;
       sampleDebtRef.current = 0;
@@ -97,7 +89,6 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
@@ -107,61 +98,43 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
     let width = 0;
     let height = 0;
     let baselineY = 0;
+    let pxPerSample = 2;
 
     const measure = () => {
       const rect = canvas.getBoundingClientRect();
       width = rect.width;
       height = rect.height;
       if (!width || !height) return false;
-      baselineY = height * 0.52;
+      baselineY = height * 0.5;
+      pxPerSample = Math.max(1, width / (SECONDS_VISIBLE * SAMPLE_RATE_HZ));
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      drawGrid(ctx, width, height);
+      drawGridBand(ctx, 0, width, height);
       lastYRef.current = baselineY;
       sweepXRef.current = 0;
       return true;
     };
 
-    const eraseAhead = (x) => {
-      const eraseX = Math.max(0, x);
-      ctx.fillStyle = BG_COLOR;
-      ctx.fillRect(eraseX, 0, ERASE_GAP, height);
-
-      const fineStep = 8;
-      const boldStep = 40;
-      ctx.strokeStyle = GRID_FINE;
-      ctx.lineWidth = 1;
-      for (let gx = Math.floor(eraseX / fineStep) * fineStep; gx <= eraseX + ERASE_GAP; gx += fineStep) {
-        ctx.beginPath();
-        ctx.moveTo(gx + 0.5, 0);
-        ctx.lineTo(gx + 0.5, height);
-        ctx.stroke();
-      }
-      for (let gy = 0; gy <= height; gy += fineStep) {
-        ctx.beginPath();
-        ctx.moveTo(eraseX, gy + 0.5);
-        ctx.lineTo(eraseX + ERASE_GAP, gy + 0.5);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = GRID_BOLD;
-      for (let gx = Math.floor(eraseX / boldStep) * boldStep; gx <= eraseX + ERASE_GAP; gx += boldStep) {
-        ctx.beginPath();
-        ctx.moveTo(gx + 0.5, 0);
-        ctx.lineTo(gx + 0.5, height);
-        ctx.stroke();
-      }
-      for (let gy = 0; gy <= height; gy += boldStep) {
-        ctx.beginPath();
-        ctx.moveTo(eraseX, gy + 0.5);
-        ctx.lineTo(eraseX + ERASE_GAP, gy + 0.5);
-        ctx.stroke();
-      }
+    const calibrate = (raw) => {
+      // slow-moving isoelectric baseline (EMA) → flat line between beats
+      if (baselineRef.current == null) baselineRef.current = raw;
+      baselineRef.current += (raw - baselineRef.current) * 0.002;
+      const dev = raw - baselineRef.current;
+      // slowly-decaying peak tracker → stable R-wave height regardless of ADC scale
+      peakRef.current = Math.max(peakRef.current * 0.9997, Math.abs(dev), 25);
+      const norm = dev / peakRef.current;
+      return Math.max(-1.15, Math.min(1.15, norm));
     };
 
     const drawSegment = (x1, y1, x2, y2) => {
-      eraseAhead(x2);
+      // blank a small band ahead of the cursor, then repaint its grid
+      const gap = Math.max(ERASE_GAP, pxPerSample + 2);
+      drawGridBand(ctx, x2, Math.min(width, x2 + gap), height);
+
       ctx.strokeStyle = TRACE_COLOR;
+      ctx.shadowColor = TRACE_GLOW;
+      ctx.shadowBlur = 6;
       ctx.lineWidth = 2;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
@@ -169,6 +142,7 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
       ctx.stroke();
+      ctx.shadowBlur = 0;
     };
 
     const render = (time) => {
@@ -176,76 +150,55 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
         animationId = requestAnimationFrame(render);
         return;
       }
-
-      const dt = Math.min((time - lastTime) / 1000, 0.05);
+      const dt = Math.min((time - lastTime) / 1000, 0.1);
       lastTime = time;
 
       if (!hasSignal) {
-        drawGrid(ctx, width, height);
-        sampleQueueRef.current = [];
+        drawGridBand(ctx, 0, width, height);
+        queueRef.current = [];
         sweepXRef.current = 0;
         lastYRef.current = baselineY;
         primedRef.current = false;
         sampleDebtRef.current = 0;
-      } else {
-        // Hold (draw nothing) until a small buffer accumulates, so the pen
-        // starts on a continuous run rather than stuttering sample-by-sample.
-        if (!primedRef.current) {
-          if (sampleQueueRef.current.length >= 15) primedRef.current = true;
-          else {
-            animationId = requestAnimationFrame(render);
-            return;
-          }
+        animationId = requestAnimationFrame(render);
+        return;
+      }
+
+      const q = queueRef.current;
+      let toDraw = Math.round(dt * SAMPLE_RATE_HZ);
+      // gently catch up if a backlog builds so the trace stays near real-time
+      if (q.length > SAMPLE_RATE_HZ * 2) toDraw += Math.ceil((q.length - SAMPLE_RATE_HZ * 2) / 15);
+
+      for (let i = 0; i < toDraw; i += 1) {
+        const raw = q.shift();
+        if (raw === undefined) break;
+        const norm = calibrate(raw);
+        let x1 = sweepXRef.current;
+        let x2 = x1 + pxPerSample;
+        const y1 = lastYRef.current;
+        const y2 = baselineY - norm * (height * AMPLITUDE_FRAC);
+
+        if (x2 >= width) {
+          sweepXRef.current = 0;
+          x1 = 0;
+          x2 = pxPerSample;
         }
-
-        const pixelsPerSample = Math.max(1.2, width / 300);
-
-        // Fractional-sample accumulator: consume exactly 100 Hz on average.
-        sampleDebtRef.current += dt * SAMPLE_RATE_HZ;
-        let samplesToDraw = Math.floor(sampleDebtRef.current);
-        sampleDebtRef.current -= samplesToDraw;
-        samplesToDraw = Math.min(samplesToDraw, 20); // cap catch-up after stall
-
-        for (let i = 0; i < samplesToDraw; i += 1) {
-          const adcValue = sampleQueueRef.current.shift();
-          if (adcValue === undefined) break;
-
-          let x1 = sweepXRef.current;
-          let x2 = x1 + pixelsPerSample;
-          const y1 = lastYRef.current;
-          const y2 = sampleToY(adcValue, baselineY, height);
-
-          if (x2 >= width) {
-            x2 = width - 1;
-            drawSegment(x1, y1, x2, y2);
-            drawGrid(ctx, width, height);
-            sweepXRef.current = 0;
-            lastYRef.current = baselineY;
-            x1 = 0;
-            x2 = pixelsPerSample;
-          }
-
-          drawSegment(x1, y1, x2, y2);
-          sweepXRef.current = x2;
-          lastYRef.current = y2;
-        }
+        drawSegment(x1, y1, x2, y2);
+        sweepXRef.current = x2;
+        lastYRef.current = y2;
       }
 
       animationId = requestAnimationFrame(render);
     };
 
     const init = () => {
-      if (measure()) {
-        animationId = requestAnimationFrame(render);
-      } else {
-        animationId = requestAnimationFrame(init);
-      }
+      if (measure()) animationId = requestAnimationFrame(render);
+      else animationId = requestAnimationFrame(init);
     };
 
     init();
     const onResize = () => measure();
     window.addEventListener("resize", onResize);
-
     return () => {
       cancelAnimationFrame(animationId);
       window.removeEventListener("resize", onResize);
@@ -255,17 +208,17 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
   return (
     <div className={`relative overflow-hidden bg-black ${className}`}>
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
-      <div className="pointer-events-none absolute left-2 top-1.5 flex items-baseline gap-3">
-        <span className="text-[11px] font-bold tracking-wider text-emerald-400">ECG II</span>
-        <span className="text-[10px] tracking-wider text-emerald-700">x1</span>
+      <div className="pointer-events-none absolute left-3 top-2 flex items-baseline gap-3">
+        <span className="text-xs font-bold tracking-wider text-emerald-400">ECG II</span>
+        <span className="text-[10px] tracking-wider text-emerald-700">×1.0</span>
       </div>
-      <div className="pointer-events-none absolute right-2 top-1.5 text-right text-[10px] leading-tight tracking-wider text-emerald-700">
+      <div className="pointer-events-none absolute right-3 top-2 text-right text-[10px] leading-tight tracking-wider text-emerald-700">
         <div>25 mm/s</div>
         <div>10 mm/mV</div>
       </div>
       {!hasSignal && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <span className="text-sm font-bold uppercase tracking-[0.25em] text-slate-500">No Signal</span>
+          <span className="text-sm font-bold uppercase tracking-[0.3em] text-slate-600">No Signal</span>
         </div>
       )}
     </div>

@@ -220,18 +220,40 @@ def _rule_based_assessment(
     rhythm_anomaly: bool,
 ) -> dict[str, Any]:
     severity = _determine_severity(spo2, bpm, temp, rhythm_anomaly)
-    summary = (
-        f"Heart rate {int(bpm)} bpm, SpO2 {int(spo2)}%, temperature {temp:.1f}°C. "
-        f"Rhythm assessment: {rhythm_status}."
+
+    # Describe each vital in clinical language rather than echoing raw numbers.
+    hr_desc = (
+        "tachycardic" if bpm > 100 else "bradycardic" if bpm < 60 else "within normal limits"
     )
+    spo2_desc = (
+        "adequately oxygenated" if spo2 >= 95
+        else "mildly desaturated" if spo2 >= 90
+        else "significantly desaturated"
+    )
+    temp_desc = (
+        "febrile" if temp >= 38.0 else "hypothermic" if temp < 36.0 else "afebrile"
+    )
+    rhythm_phrase = (
+        "with an anomalous rhythm flagged by the CNN classifier"
+        if rhythm_anomaly
+        else "in normal sinus rhythm"
+    )
+
+    summary = (
+        f"Patient is {hr_desc} at {int(bpm)} bpm, {spo2_desc} at {int(spo2)}% SpO₂, and "
+        f"{temp_desc} at {temp:.1f}°C, {rhythm_phrase}."
+    )
+
     if severity == "critical":
-        action = "Review the patient immediately and follow your escalation protocol."
+        action = (
+            "Attend the bedside immediately, confirm the reading, and activate your rapid-response "
+            "protocol."
+        )
     elif severity == "watch":
-        action = "Increase observation frequency and reassess within 15 minutes."
+        action = "Increase observation frequency and reassess vitals within 15 minutes."
     else:
-        action = "Continue routine bedside monitoring."
-    if vitals_flag != "Stable":
-        summary = f"{vitals_flag}. {summary}"
+        action = "No intervention indicated — continue routine bedside monitoring."
+
     return {
         "severity": severity,
         "confidence": 0.82,

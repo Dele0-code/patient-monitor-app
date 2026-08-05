@@ -24,11 +24,11 @@ export default function VitalGauge({
   alarmActive = false,
   history = null,
   strokeColor = "#34d399",
-  size = 88,
+  size = 128,
   theme = "dark",
 }) {
   const hasValue = value !== null && value !== undefined && !Number.isNaN(Number(value));
-  const radius = (size - 12) / 2;
+  const radius = (size - 16) / 2;
   const cx = size / 2;
   const cy = size / 2;
   const pct = hasValue ? Math.min(1, Math.max(0, (Number(value) - min) / (max - min))) : 0;
@@ -39,15 +39,15 @@ export default function VitalGauge({
 
   return (
     <div
-      className={`flex flex-col items-center border-b px-2 py-3 ${
+      className={`flex flex-col items-center border-b px-2 py-4 ${
         theme === "light" ? "border-slate-200" : "border-slate-800"
       } ${alert ? (theme === "light" ? "bg-red-50" : "bg-red-950/30") : ""} ${
         alarmActive ? "animate-pulse ring-1 ring-inset ring-red-500" : ""
       }`}
     >
       <span
-        className={`mb-1 text-[10px] font-bold uppercase tracking-widest ${
-          alert ? "text-red-500" : theme === "light" ? "text-slate-500" : "text-slate-500"
+        className={`mb-1.5 text-xs font-bold uppercase tracking-widest ${
+          alert ? "text-red-500" : "text-slate-500"
         }`}
       >
         {label}
@@ -58,7 +58,7 @@ export default function VitalGauge({
             d={describeArc(cx, cy, radius, 0, 270)}
             fill="none"
             stroke={trackColor}
-            strokeWidth="6"
+            strokeWidth="8"
             strokeLinecap="round"
           />
           {hasValue && sweep > 0 && (
@@ -66,7 +66,7 @@ export default function VitalGauge({
               d={describeArc(cx, cy, radius, 0, sweep)}
               fill="none"
               stroke={activeColor}
-              strokeWidth="6"
+              strokeWidth="8"
               strokeLinecap="round"
               className="transition-all duration-700 ease-out"
             />
@@ -76,20 +76,20 @@ export default function VitalGauge({
           {hasValue ? (
             <>
               <span
-                className={`text-xl font-bold leading-none tabular-nums ${
+                className={`text-3xl font-black leading-none tabular-nums ${
                   alert ? "text-red-500" : theme === "light" ? "text-slate-800" : "text-white"
                 }`}
               >
                 {displayValue ?? value}
               </span>
               {unit && (
-                <span className={`text-[9px] font-semibold uppercase ${theme === "light" ? "text-slate-500" : "text-slate-500"}`}>
+                <span className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
                   {unit}
                 </span>
               )}
             </>
           ) : (
-            <span className={`text-sm font-bold ${theme === "light" ? "text-slate-400" : "text-slate-600"}`}>—</span>
+            <span className={`text-2xl font-bold ${theme === "light" ? "text-slate-400" : "text-slate-600"}`}>—</span>
           )}
         </div>
       </div>
