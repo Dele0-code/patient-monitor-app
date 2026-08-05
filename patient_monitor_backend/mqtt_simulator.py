@@ -49,10 +49,22 @@ _vital_state: dict[str, float] = {
     "temp": 36.6,
 }
 
-# Continuous ECG state carried across batches so R-R spacing stays constant and
+# Continuous ECG state carried across batches so R-R spacing stays smooth and
 # beats don't reset to phase 0 at every 100-sample seam.
-_beat_phase = 0.0   # seconds elapsed into the current beat
-_beat_counter = 0   # running count of completed beats (used to schedule PVCs)
+_beat_phase = 0.0      # seconds elapsed into the current beat
+_beat_counter = 0      # running count of completed beats (used to schedule PVCs)
+_beat_duration = 0.79  # current beat's R-R interval (s); re-rolled each beat for RSA + jitter
+_resp_phase = 0.0      # seconds into the current respiratory cycle
+RESP_PERIOD_SEC = 4.0  # ~15 breaths/min
+
+# Physiological beat-to-beat variability, all as fractions of the nominal R-R:
+#  - RSA: sinusoidal with respiration (inhale shortens R-R, exhale lengthens it)
+#  - jitter: small white-noise wander so no two beats are identical
+RSA_FRAC = 0.06
+RR_JITTER_FRAC = 0.02
+# Respiratory baseline wander, in mV, added to every sample (electrode motion +
+# thoracic impedance change with breathing). Small — visible but not distracting.
+RESP_WANDER_MV = 0.08
 
 
 def _half_sine(x: float, start: float, width: float, amp: float) -> float:
@@ -108,22 +120,40 @@ def _pvc_beat(tb: float) -> float:
     return v
 
 
+def _next_rr(bpm: float) -> float:
+    """Roll the next beat's R-R interval from the nominal rate, modulated by
+    respiratory sinus arrhythmia (RSA) plus small random jitter. Phase-locked to
+    the shared _resp_phase so the ECG wander and the R-R speed-up breathe together."""
+    nominal = 60.0 / max(bpm, 40.0)
+    rsa = RSA_FRAC * math.sin(2 * math.pi * _resp_phase / RESP_PERIOD_SEC)
+    jitter = random.uniform(-RR_JITTER_FRAC, RR_JITTER_FRAC)
+    return nominal * (1.0 + rsa + jitter)
+
+
 def generate_esp32_ecg(bpm: float = 76.0, abnormal: bool = False) -> list[float]:
     """Build one SEQUENCE_LEN batch of ADC counts, advancing the continuous
-    beat phase so successive batches join seamlessly (constant R-R)."""
-    global _beat_phase, _beat_counter
-    beat_duration = 60.0 / max(bpm, 40.0)
+    beat phase so successive batches join seamlessly. R-R spacing breathes with
+    respiration (RSA) and jitters slightly beat-to-beat; a slow respiratory
+    baseline wander rides under the whole trace — the signatures that make a real
+    monitor look alive rather than a looping template."""
+    global _beat_phase, _beat_counter, _beat_duration, _resp_phase
     dt = 1.0 / SAMPLE_RATE_HZ
     samples: list[float] = []
     for _ in range(SEQUENCE_LEN):
         is_pvc = abnormal and (_beat_counter % 4 == 3)
         voltage = _pvc_beat(_beat_phase) if is_pvc else _normal_beat(_beat_phase)
+        wander = RESP_WANDER_MV * math.sin(2 * math.pi * _resp_phase / RESP_PERIOD_SEC)
         noise = random.uniform(-6, 6) if abnormal else random.uniform(-3, 3)
-        samples.append(round(ECG_BASELINE + voltage * 180 + noise, 2))
+        samples.append(round(ECG_BASELINE + (voltage + wander) * 180 + noise, 2))
         _beat_phase += dt
-        if _beat_phase >= beat_duration:
-            _beat_phase -= beat_duration
+        _resp_phase = (_resp_phase + dt) % RESP_PERIOD_SEC
+        if _beat_phase >= _beat_duration:
+            _beat_phase -= _beat_duration
             _beat_counter += 1
+            # PVCs are premature: the ectopic beat cuts its own R-R short.
+            _beat_duration = _next_rr(bpm)
+            if abnormal and (_beat_counter % 4 == 3):
+                _beat_duration *= 0.75
     return samples
 
 

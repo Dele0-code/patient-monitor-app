@@ -283,5 +283,15 @@ async def spa_fallback(full_path: str):
     # Serve a real built asset (JS/CSS/favicon) when it exists; otherwise fall
     # back to index.html so client routes like /dashboard/PT-000001 resolve.
     if full_path and candidate.startswith(DIST_DIR) and os.path.isfile(candidate):
+        # Vite fingerprints everything under /assets/ (content hash in the name),
+        # so those files are safe to cache forever. On the kiosk this means a
+        # reload re-fetches only index.html, not the JS/CSS/fonts every time.
+        if full_path.startswith("assets/"):
+            return FileResponse(
+                candidate,
+                headers={"Cache-Control": "public, max-age=31536000, immutable"},
+            )
         return FileResponse(candidate)
-    return FileResponse(index_file)
+    # index.html itself must never be cached, or a rebuild's new asset hashes
+    # would be ignored until the browser cache expired.
+    return FileResponse(index_file, headers={"Cache-Control": "no-cache"})

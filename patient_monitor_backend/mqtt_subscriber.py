@@ -135,7 +135,7 @@ def _determine_severity(spo2: float, bpm: float, temp: float, rhythm_anomaly: bo
     return "stable"
 
 
-def _build_prompt(patient_id: str, spo2: float, bpm: float, temp: float, rhythm_status: str, vitals_flag: str) -> str:
+def _build_prompt(patient_id: str, spo2: float, bpm: float, temp: float, rhythm_status: str, vitals_flag: str, trend: dict[str, Any] | None = None) -> str:
     history = list(patient_history[patient_id])[-5:]
     history_text = ""
     if history:
@@ -145,6 +145,13 @@ def _build_prompt(patient_id: str, spo2: float, bpm: float, temp: float, rhythm_
         ]
         history_text = "\nPrevious trending data:\n" + "\n".join(history_lines)
 
+    trend_text = ""
+    if trend:
+        trend_text = (
+            f"\nAutomated trend (recent window): HR {trend['hr']}, SpO2 {trend['spo2']}, "
+            f"Temp {trend['temp']}. Suggested monitoring focus: {trend['monitoring_focus']}."
+        )
+
     return f"""You are an advanced clinical AI assistant embedded within an ICU patient monitoring dashboard.
 Analyze these real-time telemetry findings:
 - Patient ID: {patient_id}
@@ -152,7 +159,7 @@ Analyze these real-time telemetry findings:
 - Oxygen Saturation (SpO2): {spo2}%
 - Body Temperature: {temp} degC
 - Automated Neural Network ECG Interpretation: {rhythm_status}
-- Automated Threshold Alerts: {vitals_flag}{history_text}
+- Automated Threshold Alerts: {vitals_flag}{history_text}{trend_text}
 
 Task: Return valid JSON only. Do not include any surrounding prose.
 The JSON must contain these keys:
@@ -263,6 +270,57 @@ def _rule_based_assessment(
     }
 
 
+def _direction(values: list[float], rel_eps: float) -> str:
+    """Classify a short series as rising / falling / steady by comparing the mean
+    of its older half to its newer half. rel_eps is the fractional change below
+    which we call it steady (per-vital, so HR noise doesn't read as a trend)."""
+    if len(values) < 4:
+        return "steady"
+    mid = len(values) // 2
+    old = sum(values[:mid]) / mid
+    new = sum(values[mid:]) / (len(values) - mid)
+    if old == 0:
+        return "steady"
+    change = (new - old) / abs(old)
+    if change > rel_eps:
+        return "rising"
+    if change < -rel_eps:
+        return "falling"
+    return "steady"
+
+
+def _compute_trend(patient_id: str) -> dict[str, Any]:
+    """Derive per-vital direction + the single vital most worth watching from the
+    recent history window. Gives the panel a 'where is this patient heading'
+    view instead of just the instantaneous snapshot."""
+    history = list(patient_history[patient_id])[-8:]
+    hr = [float(h["max_bpm"]) for h in history if h.get("max_bpm") is not None]
+    spo2 = [float(h["spo2"]) for h in history if h.get("spo2") is not None]
+    temp = [float(h["temperature_c"]) for h in history if h.get("temperature_c") is not None]
+
+    hr_dir = _direction(hr, 0.05)
+    spo2_dir = _direction(spo2, 0.015)
+    temp_dir = _direction(temp, 0.01)
+
+    # Monitoring focus: the vital whose current value + direction is most
+    # concerning. Falling SpO2 and climbing HR/temp are the deterioration cues.
+    focus = "Overall stability"
+    if spo2 and (spo2[-1] < 94 or spo2_dir == "falling"):
+        focus = "Oxygenation (SpO₂ trend)"
+    elif hr and (hr[-1] > 110 or hr[-1] < 55 or hr_dir == "rising"):
+        focus = "Heart rate trajectory"
+    elif temp and (temp[-1] >= 38.0 or temp_dir == "rising"):
+        focus = "Temperature trend"
+
+    return {
+        "hr": hr_dir,
+        "spo2": spo2_dir,
+        "temp": temp_dir,
+        "monitoring_focus": focus,
+        "window": len(history),
+    }
+
+
 async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
     patient_id = payload.get("patient_id")
     if not patient_id:
@@ -337,6 +395,7 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
     )
     quick_assessment = cached or fresh_rules
     quick_source = "llm_cached" if cached else "rules"
+    trend = _compute_trend(patient_id)
 
     await ws_manager.broadcast(
         patient_id,
@@ -359,11 +418,12 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
             "summary": quick_assessment["summary"],
             "recommended_action": quick_assessment["recommended_action"],
             "assessment_source": quick_source,
+            "trend": trend,
             "telemetry_source": telemetry_source,
         },
     )
 
-    prompt = _build_prompt(patient_id, spo2, bpm, temp, rhythm_status, vitals_flag)
+    prompt = _build_prompt(patient_id, spo2, bpm, temp, rhythm_status, vitals_flag, trend)
     instant_severity = _determine_severity(spo2, bpm, temp, rhythm_anomaly)
     rule_severity = _stabilize_severity(patient_id, instant_severity)
     previous_rule_severity = _last_rule_severity.get(patient_id)
@@ -464,6 +524,7 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
         "summary": assessment["summary"],
         "recommended_action": assessment["recommended_action"],
         "assessment_source": assessment_source,
+        "trend": trend,
         "telemetry_source": telemetry_source,
     }
 

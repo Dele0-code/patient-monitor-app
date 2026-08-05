@@ -36,6 +36,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
   const [systemFlags, setSystemFlags] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [rawEcg, setRawEcg] = useState(null);
+  const [trend, setTrend] = useState(null);
   const [latchedAlert, setLatchedAlert] = useState(null);
 
   const vitalHistoryRef = useRef([]);
@@ -73,6 +74,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
       setRhythmAnomaly(null);
       setSystemFlags(null);
       setRawEcg(null);
+      setTrend(null);
       vitalHistoryRef.current = [];
       setVitalHistory([]);
       return;
@@ -93,6 +95,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
     if (liveEvent.rhythm_anomaly != null) setRhythmAnomaly(liveEvent.rhythm_anomaly);
     if (liveEvent.system_flags) setSystemFlags(liveEvent.system_flags);
     if (liveEvent.raw_ecg?.length) setRawEcg(liveEvent.raw_ecg);
+    if (liveEvent.trend) setTrend(liveEvent.trend);
 
     // Ring buffer of the last HISTORY_LEN readings for NEWS2 trend + sparklines.
     const reading = {
@@ -271,6 +274,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
             summary={summaryText}
             recommendedAction={recommendedAction}
             assessmentSource={assessmentSource}
+            trend={trend}
             readingTimestamp={liveEvent?.timestamp}
             theme={theme}
             className="shrink-0"

@@ -22,6 +22,28 @@ const SOURCE_LABEL = {
   rules: "RULE ENGINE",
 };
 
+// Direction glyph + colour for a single vital's recent trend. "rising" is not
+// inherently bad (that depends on the vital), so colour stays neutral-amber for
+// any movement and slate for steady — the monitoring-focus line carries the
+// clinical "which way is concerning" judgement.
+const TREND_STYLE = {
+  rising: { glyph: "▲", cls: "text-amber-600 dark:text-amber-400" },
+  falling: { glyph: "▼", cls: "text-amber-600 dark:text-amber-400" },
+  steady: { glyph: "▬", cls: "text-slate-400 dark:text-slate-600" },
+};
+
+function TrendRow({ label, direction, textMuted }) {
+  const t = TREND_STYLE[direction] || TREND_STYLE.steady;
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className={`uppercase tracking-wider ${textMuted}`}>{label}</span>
+      <span className={`font-bold uppercase tabular-nums ${t.cls}`}>
+        {t.glyph} {direction || "steady"}
+      </span>
+    </div>
+  );
+}
+
 function ConfidenceMeter({ value, theme }) {
   if (value == null || Number.isNaN(Number(value))) {
     return <span className="text-slate-400">—</span>;
@@ -55,6 +77,7 @@ export default function ClinicalAssessment({
   summary,
   recommendedAction,
   assessmentSource,
+  trend,
   readingTimestamp,
   theme = "dark",
   className = "",
@@ -142,9 +165,30 @@ export default function ClinicalAssessment({
               <ConfidenceMeter value={confidence} theme={theme} />
             </div>
           </div>
+
+          {trend && (
+            <div className={`space-y-1.5 border-t pt-2 text-xs ${borderColor}`}>
+              <div className={`text-[10px] font-bold uppercase tracking-widest ${textMuted}`}>
+                Trend ({trend.window || 0} readings)
+              </div>
+              <TrendRow label="HR" direction={trend.hr} textMuted={textMuted} />
+              <TrendRow label="SpO₂" direction={trend.spo2} textMuted={textMuted} />
+              <TrendRow label="Temp" direction={trend.temp} textMuted={textMuted} />
+            </div>
+          )}
         </div>
 
         <div className={`flex min-w-0 flex-1 flex-col gap-2 border-t pt-2 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0 ${borderColor}`}>
+          {trend?.monitoring_focus && (
+            <div className="flex items-center gap-2 rounded-lg border border-sky-300 bg-sky-50 px-2.5 py-1.5 dark:border-sky-900/50 dark:bg-sky-950/20">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-sky-700 dark:text-sky-300">
+                Monitoring Focus
+              </span>
+              <span className="text-xs font-semibold text-sky-900 dark:text-sky-200">
+                {trend.monitoring_focus}
+              </span>
+            </div>
+          )}
           <div
             className={`rounded-lg border p-2.5 ${
               isLlm
