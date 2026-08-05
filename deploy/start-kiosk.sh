@@ -33,6 +33,7 @@ CHROME_BIN="$(command -v chromium-browser || command -v chromium || echo chromiu
 exec "$CHROME_BIN" \
   --kiosk \
   --autoplay-policy=no-user-gesture-required \
+  --password-store=basic \
   --noerrdialogs \
   --disable-infobars \
   --disable-session-crashed-bubble \
