@@ -28,10 +28,22 @@ fi
 # 3) Pick whichever Chromium binary this image ships.
 CHROME_BIN="$(command -v chromium-browser || command -v chromium || echo chromium-browser)"
 
+# UI scale for a large bedside TV viewed from a distance. Sourced from the
+# backend .env (KIOSK_SCALE) so it lives with the rest of the appliance config;
+# defaults to 1.5 (50% bigger) if unset. --force-device-scale-factor scales the
+# WHOLE UI crisply, so the small px fonts stay proportional and sharp.
+KIOSK_SCALE="${KIOSK_SCALE:-1.5}"
+ENV_FILE="$(cd "$(dirname "$0")/.." && pwd)/patient_monitor_backend/.env"
+if [ -f "$ENV_FILE" ]; then
+  ENV_SCALE="$(grep -E '^KIOSK_SCALE=' "$ENV_FILE" | tail -1 | cut -d= -f2 | tr -d '[:space:]')"
+  [ -n "$ENV_SCALE" ] && KIOSK_SCALE="$ENV_SCALE"
+fi
+
 # --autoplay-policy=no-user-gesture-required is ESSENTIAL: without it WebAudio
 # stays suspended and NO alarm sounds until someone clicks the screen.
 exec "$CHROME_BIN" \
   --kiosk \
+  --force-device-scale-factor="$KIOSK_SCALE" \
   --autoplay-policy=no-user-gesture-required \
   --password-store=basic \
   --noerrdialogs \

@@ -1,5 +1,9 @@
 fastapi
-uvicorn
+# [standard] pulls in the websockets + wsproto stack. Plain uvicorn cannot
+# complete the WebSocket upgrade, so /ws/{patient_id} silently fails and the
+# dashboard shows "Awaiting telemetry" forever even while MQTT data flows in.
+uvicorn[standard]
+websockets
 ollama
 python-dotenv
 pydantic
