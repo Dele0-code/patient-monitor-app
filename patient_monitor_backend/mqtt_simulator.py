@@ -28,6 +28,9 @@ logger = logging.getLogger("patient_monitor.mqtt_simulator")
 
 SEQUENCE_LEN = 100
 ECG_BASELINE = 2048.0
+# Samples per second in the raw_ecg stream. MUST match the frontend
+# EcgWaveform.jsx SAMPLE_RATE_HZ so the sweep plays at real time with no stall.
+SAMPLE_RATE_HZ = 100
 
 STABLE_PHASE_SEC = 40
 ABNORMAL_PHASE_SEC = 25
@@ -46,37 +49,81 @@ _vital_state: dict[str, float] = {
     "temp": 36.6,
 }
 
+# Continuous ECG state carried across batches so R-R spacing stays constant and
+# beats don't reset to phase 0 at every 100-sample seam.
+_beat_phase = 0.0   # seconds elapsed into the current beat
+_beat_counter = 0   # running count of completed beats (used to schedule PVCs)
 
-def _synthetic_ecg_sample(t: float, bpm: float, abnormal: bool = False) -> float:
-    beat_duration = 60.0 / max(bpm, 40)
-    beat_time = t % beat_duration
-    ratio = beat_time / beat_duration
 
-    if abnormal and 0.35 <= ratio < 0.42:
-        return 1.8 * math.sin(math.pi * (ratio - 0.35) / 0.07)
-
-    if 0.02 <= ratio < 0.10:
-        return 0.12 * math.sin(math.pi * (ratio - 0.02) / 0.08)
-    if 0.12 <= ratio < 0.14:
-        return -0.15 * math.sin(math.pi * (ratio - 0.12) / 0.02)
-    if 0.14 <= ratio < 0.17:
-        return 1.25 * math.sin(math.pi * (ratio - 0.14) / 0.03)
-    if 0.17 <= ratio < 0.21:
-        return -0.35 * math.sin(math.pi * (ratio - 0.17) / 0.04)
-    if 0.24 <= ratio < 0.40:
-        return 0.25 * math.sin(math.pi * (ratio - 0.24) / 0.16)
+def _half_sine(x: float, start: float, width: float, amp: float) -> float:
+    """Smooth symmetric hump: amp*sin(pi*(x-start)/width) over [start, start+width]."""
+    if start <= x < start + width:
+        return amp * math.sin(math.pi * (x - start) / width)
     return 0.0
 
 
+def _triangle(x: float, start: float, peak: float, end: float, amp: float) -> float:
+    """Sharp piecewise-linear deflection: 0 -> amp at `peak` -> 0 at `end`."""
+    if start <= x < peak:
+        return amp * (x - start) / (peak - start)
+    if peak <= x < end:
+        return amp * (1.0 - (x - peak) / (end - peak))
+    return 0.0
+
+
+def _asym_bump(x: float, start: float, peak: float, end: float, amp: float) -> float:
+    """Asymmetric rounded wave (slow upstroke, faster downstroke) for the T wave."""
+    if start <= x < peak:
+        return amp * math.sin((math.pi / 2) * (x - start) / (peak - start))
+    if peak <= x < end:
+        return amp * math.cos((math.pi / 2) * (x - peak) / (end - peak))
+    return 0.0
+
+
+def _normal_beat(tb: float) -> float:
+    """One physiological Lead-II beat. `tb` = seconds into the beat. Returns mV.
+
+    Landmarks are anchored in absolute seconds (real QRS width is ~constant
+    regardless of heart rate; only the diastolic baseline stretches).
+    """
+    v = 0.0
+    v += _half_sine(tb, 0.00, 0.09, 0.15)          # P wave (small upright)
+    # PR segment 0.09-0.13 s: isoelectric
+    v += _triangle(tb, 0.13, 0.140, 0.15, -0.10)   # Q (small dip)
+    v += _triangle(tb, 0.15, 0.170, 0.19, 1.20)    # R (sharp tall spike)
+    v += _triangle(tb, 0.19, 0.205, 0.22, -0.25)   # S (dip below baseline)
+    # ST segment 0.22-0.32 s: isoelectric
+    v += _asym_bump(tb, 0.32, 0.410, 0.48, 0.30)   # T wave (asymmetric)
+    # diastole: flat until the next beat (longer at low HR — physiological)
+    return v
+
+
+def _pvc_beat(tb: float) -> float:
+    """A premature ventricular contraction: wide bizarre QRS, no P wave,
+    tall, with a discordant (inverted) T wave. A recognizable anomaly."""
+    v = 0.0
+    v += _triangle(tb, 0.12, 0.190, 0.26, 1.60)    # wide tall R
+    v += _triangle(tb, 0.26, 0.300, 0.34, -0.45)   # deep wide S
+    v += _asym_bump(tb, 0.38, 0.460, 0.56, -0.35)  # inverted T
+    return v
+
+
 def generate_esp32_ecg(bpm: float = 76.0, abnormal: bool = False) -> list[float]:
+    """Build one SEQUENCE_LEN batch of ADC counts, advancing the continuous
+    beat phase so successive batches join seamlessly (constant R-R)."""
+    global _beat_phase, _beat_counter
+    beat_duration = 60.0 / max(bpm, 40.0)
+    dt = 1.0 / SAMPLE_RATE_HZ
     samples: list[float] = []
-    for i in range(SEQUENCE_LEN):
-        t = i / 100.0
-        voltage = _synthetic_ecg_sample(t, bpm, abnormal=abnormal)
+    for _ in range(SEQUENCE_LEN):
+        is_pvc = abnormal and (_beat_counter % 4 == 3)
+        voltage = _pvc_beat(_beat_phase) if is_pvc else _normal_beat(_beat_phase)
         noise = random.uniform(-6, 6) if abnormal else random.uniform(-3, 3)
-        if abnormal and random.random() < 0.08:
-            voltage += random.uniform(0.6, 1.2)
         samples.append(round(ECG_BASELINE + voltage * 180 + noise, 2))
+        _beat_phase += dt
+        if _beat_phase >= beat_duration:
+            _beat_phase -= beat_duration
+            _beat_counter += 1
     return samples
 
 

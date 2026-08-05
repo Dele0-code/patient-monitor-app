@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 
 import auth
@@ -263,3 +264,24 @@ async def websocket_endpoint(websocket: WebSocket, patient_id: str):
         pass
     finally:
         await ws_manager.unregister(patient_id, websocket)
+
+
+# --- Static frontend (production / Raspberry Pi kiosk) -----------------------
+# When the Vite build exists at patient-monitor-app/dist, serve it from this same
+# process so the appliance runs as ONE service (uvicorn on :8000) — no Node
+# runtime needed. In dev the Vite server handles the UI and this block is skipped.
+# Declared LAST so it never shadows /api, /health, /ws, or the auth routes.
+DIST_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "dist"))
+
+
+@app.get("/{full_path:path}")
+async def spa_fallback(full_path: str):
+    index_file = os.path.join(DIST_DIR, "index.html")
+    if not os.path.isfile(index_file):
+        raise HTTPException(status_code=404, detail="Frontend build not found — run `npm run build`")
+    candidate = os.path.normpath(os.path.join(DIST_DIR, full_path))
+    # Serve a real built asset (JS/CSS/favicon) when it exists; otherwise fall
+    # back to index.html so client routes like /dashboard/PT-000001 resolve.
+    if full_path and candidate.startswith(DIST_DIR) and os.path.isfile(candidate):
+        return FileResponse(candidate)
+    return FileResponse(index_file)

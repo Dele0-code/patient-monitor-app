@@ -49,7 +49,7 @@ function drawGrid(ctx, width, height) {
 function sampleToY(value, baselineY, height) {
   const v = Number(value);
   if (!Number.isFinite(v)) return baselineY;
-  const gain = height * 0.00085;
+  const gain = height * 0.0016;
   return baselineY - (v - ADC_BASELINE) * gain;
 }
 
@@ -59,6 +59,14 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
   const lastYRef = useRef(0);
   const sweepXRef = useRef(0);
   const lastBatchKeyRef = useRef(null);
+  // Fractional-sample accumulator: rAF fires at the display refresh (~60 Hz) but
+  // samples arrive at 100 Hz. Consuming floor(dt*100) per frame drops the
+  // fractional remainder every frame (~40% of samples), mangling the waveform.
+  // Carrying the remainder here makes average consumption exactly match 100 Hz.
+  const sampleDebtRef = useRef(0);
+  // Wait for a small buffer before drawing so the sweep never underflows at the
+  // seam between two batches (delivery is 100 samples/s == consumption rate).
+  const primedRef = useRef(false);
 
   useEffect(() => {
     if (!hasSignal || !rawEcg?.length) return;
@@ -81,6 +89,8 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
     if (!hasSignal) {
       sampleQueueRef.current = [];
       lastBatchKeyRef.current = null;
+      primedRef.current = false;
+      sampleDebtRef.current = 0;
     }
   }, [hasSignal]);
 
@@ -175,9 +185,26 @@ export default function EcgWaveform({ rawEcg = null, hasSignal = false, classNam
         sampleQueueRef.current = [];
         sweepXRef.current = 0;
         lastYRef.current = baselineY;
+        primedRef.current = false;
+        sampleDebtRef.current = 0;
       } else {
+        // Hold (draw nothing) until a small buffer accumulates, so the pen
+        // starts on a continuous run rather than stuttering sample-by-sample.
+        if (!primedRef.current) {
+          if (sampleQueueRef.current.length >= 15) primedRef.current = true;
+          else {
+            animationId = requestAnimationFrame(render);
+            return;
+          }
+        }
+
         const pixelsPerSample = Math.max(1.2, width / 300);
-        const samplesToDraw = Math.max(1, Math.floor(dt * SAMPLE_RATE_HZ));
+
+        // Fractional-sample accumulator: consume exactly 100 Hz on average.
+        sampleDebtRef.current += dt * SAMPLE_RATE_HZ;
+        let samplesToDraw = Math.floor(sampleDebtRef.current);
+        sampleDebtRef.current -= samplesToDraw;
+        samplesToDraw = Math.min(samplesToDraw, 20); // cap catch-up after stall
 
         for (let i = 0; i < samplesToDraw; i += 1) {
           const adcValue = sampleQueueRef.current.shift();

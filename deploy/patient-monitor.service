@@ -1,0 +1,20 @@
+[Unit]
+Description=Patient Monitor backend (FastAPI + MQTT ingest + served UI)
+After=network-online.target mosquitto.service
+Wants=network-online.target
+Requires=mosquitto.service
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__APP__/patient_monitor_backend
+EnvironmentFile=__APP__/patient_monitor_backend/.env
+# Serves API + WebSocket + the built UI (dist/) on one port.
+ExecStart=__APP__/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=3
+# 2 GB Pi guard: if the LLM is enabled and the box OOMs, restart cleanly.
+OOMPolicy=continue
+
+[Install]
+WantedBy=multi-user.target

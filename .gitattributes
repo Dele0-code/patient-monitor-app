@@ -1,0 +1,7 @@
+# Keep Unix line endings on files that run on the Raspberry Pi (Linux).
+# CRLF would break shell scripts ("bad interpreter") and systemd units.
+*.sh            text eol=lf
+deploy/*.service text eol=lf
+deploy/*.desktop text eol=lf
+deploy/*.conf    text eol=lf
+deploy/.env.pi   text eol=lf

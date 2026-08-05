@@ -83,7 +83,7 @@ export default function ClinicalAssessment({
   }
 
   return (
-    <div className={`flex min-h-[160px] flex-col overflow-y-auto border-t ${borderColor} ${panelBg} ${className}`}>
+    <div className={`flex flex-col border-t ${borderColor} ${panelBg} ${className}`}>
       <div className={`h-1 w-full shrink-0 ${style.bar}`} />
 
       <div className="flex flex-1 flex-col gap-3 px-3 py-2 lg:flex-row lg:gap-4 lg:px-4 lg:py-3">

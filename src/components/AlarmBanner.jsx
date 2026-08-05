@@ -1,4 +1,4 @@
-export default function AlarmBanner({ severity, systemFlags, latchedSeverity }) {
+export default function AlarmBanner({ severity, systemFlags, latchedSeverity, signalLost = false }) {
   const displaySeverity = latchedSeverity || severity;
 
   if (displaySeverity === "critical") {
@@ -10,9 +10,18 @@ export default function AlarmBanner({ severity, systemFlags, latchedSeverity }) 
     );
   }
 
+  // Technical (equipment) alarm — distinct from clinical severity banners.
+  if (signalLost) {
+    return (
+      <div className="animate-pulse bg-sky-400 px-3 py-1.5 text-center text-xs font-bold uppercase tracking-[0.2em] text-black">
+        !! SIGNAL LOST !!  NO TELEMETRY — CHECK DEVICE / CONNECTION
+      </div>
+    );
+  }
+
   if (displaySeverity === "watch") {
     return (
-      <div className="bg-amber-500 px-3 py-1.5 text-center text-xs font-bold uppercase tracking-[0.2em] text-black">
+      <div className="animate-pulse bg-amber-500 px-3 py-1.5 text-center text-xs font-bold uppercase tracking-[0.2em] text-black">
         ** WATCH **
         {systemFlags && systemFlags !== "Stable" ? `  ${systemFlags}` : "  INCREASED MONITORING"}
       </div>

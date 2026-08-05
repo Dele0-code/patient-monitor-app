@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Patient Monitor Kiosk
+Comment=Launch the bedside monitor fullscreen on login
+Exec=__APP__/deploy/start-kiosk.sh
+X-GNOME-Autostart-enabled=true

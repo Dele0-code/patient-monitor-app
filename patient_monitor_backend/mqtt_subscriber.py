@@ -16,7 +16,7 @@ from config import (
     MQTT_BROKER_PORT,
     OLLAMA_HOST,
     USE_LLM,
-    telemetry_subscription_filter,
+    telemetry_subscription_filters,
 )
 from main import ecg_model
 from state import patient_history
@@ -32,6 +32,10 @@ ollama_client = ollama.Client(host=OLLAMA_HOST, timeout=15)
 _last_rule_severity: dict[str, str] = {}
 _last_llm_assessment: dict[str, dict[str, Any]] = {}
 _last_llm_call_time: dict[str, float] = {}
+# One LLM generation in flight per patient at a time. Telemetry now arrives at
+# 1 Hz but a CPU generation takes several seconds; without this guard, calls
+# stack on Ollama's serial queue and every one times out.
+_llm_in_flight: set[str] = set()
 _last_real_telemetry_at: float | None = None
 _severity_streak: dict[str, dict[str, Any]] = {}
 _vitals_flag_streak: dict[str, dict[str, Any]] = {}
@@ -57,6 +61,23 @@ def _normalize_ecg_window(raw_ecg: list[float]) -> list[float] | None:
             return raw_ecg[:ECG_SEQUENCE_LEN]
         return raw_ecg + [raw_ecg[-1]] * (ECG_SEQUENCE_LEN - n)
     return None
+
+
+# A real epoch timestamp (ms) is ~1.7e12 in 2024+. Devices that send
+# millis()-since-boot produce small values (uptime), which the UI would render
+# as a 1970 time. Treat anything below this as "not wall-clock" and stamp the
+# server's receive time instead.
+_EPOCH_MS_FLOOR = 1_000_000_000_000  # 2001-09-09 in ms
+
+
+def _normalize_timestamp(raw_timestamp: Any) -> int:
+    try:
+        ts = int(raw_timestamp)
+        if ts >= _EPOCH_MS_FLOOR:
+            return ts
+    except (TypeError, ValueError):
+        pass
+    return int(time.time() * 1000)
 
 
 def _determine_vitals_flag(spo2: float, bpm: float, temp: float) -> str:
@@ -231,7 +252,7 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
         bpm = float(payload.get("max_bpm", 0))
         temp = float(payload.get("temperature_c", 0))
         raw_ecg = payload.get("raw_ecg", []) or []
-        timestamp = payload.get("timestamp")
+        timestamp = _normalize_timestamp(payload.get("timestamp"))
         telemetry_source = payload.get("telemetry_source", "hardware")
     except Exception as exc:
         logger.warning("Failed to parse telemetry payload for %s: %s", patient_id, exc)
@@ -328,10 +349,21 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
     now = time.monotonic()
     last_llm_at = _last_llm_call_time.get(patient_id, 0.0)
     throttle_elapsed = now - last_llm_at >= LLM_THROTTLE_SEC
-    should_call_llm = USE_LLM and (previous_rule_severity is None or severity_changed or throttle_elapsed)
+    # Skip if a generation for this patient is still running — otherwise 1 Hz
+    # telemetry stacks calls on Ollama's serial queue and they all time out.
+    busy = patient_id in _llm_in_flight
+    should_call_llm = (
+        USE_LLM
+        and not busy
+        and (previous_rule_severity is None or severity_changed or throttle_elapsed)
+    )
 
     assessment_source = "rules"
     if should_call_llm:
+        # Start the throttle window now, before the call, so a timeout can't
+        # cause an immediate re-fire on the very next reading.
+        _last_llm_call_time[patient_id] = now
+        _llm_in_flight.add(patient_id)
         try:
             llm_response = await asyncio.to_thread(
                 ollama_client.generate,
@@ -342,7 +374,7 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
             )
             assessment = _parse_llm_response(llm_response.get("response", ""))
             _last_llm_assessment[patient_id] = assessment
-            _last_llm_call_time[patient_id] = now
+            _last_llm_call_time[patient_id] = time.monotonic()
             assessment_source = assessment.get("assessment_source", "llm")
             if severity_changed:
                 logger.info(
@@ -362,6 +394,8 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
                     spo2, bpm, temp, rhythm_status, vitals_flag, rhythm_anomaly
                 )
                 assessment_source = "rules"
+        finally:
+            _llm_in_flight.discard(patient_id)
     else:
         cached = _last_llm_assessment.get(patient_id)
         if cached:
@@ -434,7 +468,9 @@ async def _handle_telemetry_message(payload: dict[str, Any]) -> None:
 def _on_connect(client: mqtt.Client, userdata: Any, flags: dict[str, int], rc: int) -> None:
     if rc == 0:
         logger.info("Connected to MQTT broker at %s:%d", MQTT_BROKER_HOST, MQTT_BROKER_PORT)
-        client.subscribe(telemetry_subscription_filter(), qos=1)
+        filters = telemetry_subscription_filters()
+        client.subscribe([(f, 1) for f in filters])
+        logger.info("Subscribed to telemetry topics: %s", ", ".join(filters))
     else:
         logger.error("MQTT connection failed with rc=%s", rc)
 

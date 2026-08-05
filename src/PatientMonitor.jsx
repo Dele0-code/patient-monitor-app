@@ -1,15 +1,18 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import EcgWaveform from "./components/EcgWaveform.jsx";
 import AlarmBanner from "./components/AlarmBanner.jsx";
 import AlertDetailPanel from "./components/AlertDetailPanel.jsx";
 import ConnectionBadge from "./components/ConnectionBadge.jsx";
 import ClinicalAssessment from "./components/ClinicalAssessment.jsx";
+import EarlyWarningPanel from "./components/EarlyWarningPanel.jsx";
+import PatientStrip from "./components/PatientStrip.jsx";
 import VitalGauge from "./components/VitalGauge.jsx";
+import useAlarms from "./hooks/useAlarms.js";
 import { useTheme } from "./context/ThemeContext.jsx";
 import { getPatient } from "./patients.js";
 
-const NO_SIGNAL = "— — —";
 const ALERT_HOLD_MS = 60000;
+const HISTORY_LEN = 60;
 
 export default function PatientMonitor({ patientId, liveEvent, connectionStatus }) {
   const { theme, toggleTheme } = useTheme();
@@ -31,13 +34,11 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
   const [ecgPrediction, setEcgPrediction] = useState(null);
   const [rhythmAnomaly, setRhythmAnomaly] = useState(null);
   const [systemFlags, setSystemFlags] = useState(null);
-  const [audioEnabled, setAudioEnabled] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [rawEcg, setRawEcg] = useState(null);
   const [latchedAlert, setLatchedAlert] = useState(null);
 
-  const audioCtxRef = useRef(null);
-  const audioEnabledRef = useRef(audioEnabled);
+  const vitalHistoryRef = useRef([]);
 
   const isDark = theme === "dark";
   const shell = isDark ? "bg-black text-slate-100" : "bg-slate-100 text-slate-900";
@@ -47,9 +48,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
   const labelMuted = isDark ? "text-slate-600" : "text-slate-500";
   const accent = isDark ? "text-emerald-400" : "text-emerald-600";
 
-  useEffect(() => {
-    audioEnabledRef.current = audioEnabled;
-  }, [audioEnabled]);
+  const [vitalHistory, setVitalHistory] = useState([]);
 
   useEffect(() => {
     const clock = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -74,6 +73,8 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
       setRhythmAnomaly(null);
       setSystemFlags(null);
       setRawEcg(null);
+      vitalHistoryRef.current = [];
+      setVitalHistory([]);
       return;
     }
 
@@ -92,40 +93,18 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
     if (liveEvent.rhythm_anomaly != null) setRhythmAnomaly(liveEvent.rhythm_anomaly);
     if (liveEvent.system_flags) setSystemFlags(liveEvent.system_flags);
     if (liveEvent.raw_ecg?.length) setRawEcg(liveEvent.raw_ecg);
+
+    // Ring buffer of the last HISTORY_LEN readings for NEWS2 trend + sparklines.
+    const reading = {
+      hr: liveEvent.max_bpm ?? null,
+      spo2: liveEvent.spo2 ?? null,
+      temp: liveEvent.temperature_c ?? null,
+      sbp: liveEvent.nibp_sys ?? null,
+    };
+    const next = [...vitalHistoryRef.current, reading].slice(-HISTORY_LEN);
+    vitalHistoryRef.current = next;
+    setVitalHistory(next);
   }, [connectionStatus, liveEvent]);
-
-  const triggerBeep = useCallback((freq, duration, volume = 0.05) => {
-    if (!audioEnabledRef.current) return;
-    try {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      if (!audioCtxRef.current && AudioContext) audioCtxRef.current = new AudioContext();
-      const ctx = audioCtxRef.current;
-      if (!ctx || ctx.state === "suspended") return;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(freq, ctx.currentTime);
-      gain.gain.setValueAtTime(volume, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + duration);
-    } catch {
-      // Audio unavailable on kiosk
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!hasData || severityTag !== "critical") return undefined;
-    const activeSeverity = latchedAlert?.severity === "critical" ? "critical" : severityTag;
-    if (activeSeverity !== "critical") return undefined;
-    const interval = setInterval(() => {
-      triggerBeep(880, 0.1, 0.08);
-      setTimeout(() => triggerBeep(880, 0.1, 0.08), 150);
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [hasData, severityTag, latchedAlert, triggerBeep]);
 
   const hrAlertInstant = hasData && heartRate != null && (heartRate > 110 || heartRate < 52);
   const spo2AlertInstant = hasData && spo2 != null && spo2 < 92;
@@ -199,6 +178,21 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
     tempAlertInstant || Boolean(latchedAlert?.messages.some((m) => /pyrexia|hypothermia|°C/i.test(m)));
   const nibpAlert = nibpAlertInstant;
 
+  // Highest active alarm priority drives the hospital-style tone/silence machine.
+  const activeSeverity = latchedAlert?.severity || (hasData ? severityTag : null);
+  const anyVitalAlert = hrAlert || spo2Alert || tempAlert || nibpAlert;
+  const alarmPriority =
+    activeSeverity === "critical"
+      ? "critical"
+      : activeSeverity === "watch" || anyVitalAlert
+        ? "watch"
+        : "none";
+
+  const alarms = useAlarms(alarmPriority, connectionStatus);
+  // A gauge pulses only while its alarm is active AND not silenced.
+  const gaugeAlarmLive = (isAlert) => isAlert && alarms.audible;
+  const signalLost = alarms.priority === "noSignal";
+
   const nibpGaugeValue = hasData && nibpSys != null ? nibpSys : null;
   const nibpDisplay = !hasData || nibpSys == null || nibpDia == null ? null : `${nibpSys}/${nibpDia}`;
 
@@ -214,6 +208,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
         severity={hasData ? severityTag : null}
         systemFlags={systemFlags}
         latchedSeverity={latchedAlert?.severity}
+        signalLost={signalLost}
       />
       <AlertDetailPanel alert={latchedAlert} theme={theme} />
 
@@ -230,6 +225,10 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
           <div className="hidden shrink-0 md:block">
             <div className={`text-[9px] uppercase tracking-widest ${labelMuted}`}>Location</div>
             <div className={`text-sm font-bold ${isDark ? "text-slate-300" : "text-slate-700"}`}>{location}</div>
+          </div>
+          <div className="hidden min-w-0 lg:block">
+            <div className={`mb-0.5 text-[9px] uppercase tracking-widest ${labelMuted}`}>Beds</div>
+            <PatientStrip activeId={patientId} theme={theme} liveStatus={connectionStatus} />
           </div>
         </div>
 
@@ -259,7 +258,7 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
 
       <main className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <section className={`flex min-h-0 min-w-0 flex-[2] flex-col border-b lg:flex-[3] lg:border-b-0 lg:border-r ${borderColor}`}>
-          <EcgWaveform rawEcg={rawEcg} hasSignal={hasData} className="h-[120px] shrink-0 sm:h-[140px]" />
+          <EcgWaveform rawEcg={rawEcg} hasSignal={hasData} className="h-[150px] shrink-0 sm:h-[170px]" />
 
           <ClinicalAssessment
             hasData={hasData}
@@ -274,8 +273,16 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
             assessmentSource={assessmentSource}
             readingTimestamp={liveEvent?.timestamp}
             theme={theme}
-            className="min-h-0 flex-1"
+            className="shrink-0"
           />
+
+          <div className={`min-h-0 flex-1 overflow-y-auto border-t ${borderColor}`}>
+            <EarlyWarningPanel
+              vitals={{ spo2, temp, hr: heartRate, sbp: nibpSys }}
+              history={vitalHistory}
+              theme={theme}
+            />
+          </div>
         </section>
 
         <aside className={`grid w-full shrink-0 grid-cols-2 gap-0 lg:flex lg:w-56 lg:flex-col xl:w-64 ${asideBg}`}>
@@ -287,6 +294,8 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
             min={40}
             max={160}
             alert={hrAlert}
+            alarmActive={gaugeAlarmLive(hrAlert)}
+            history={vitalHistory.map((r) => r.hr).filter((v) => v != null)}
             strokeColor="#34d399"
             theme={theme}
           />
@@ -298,6 +307,8 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
             min={80}
             max={100}
             alert={spo2Alert}
+            alarmActive={gaugeAlarmLive(spo2Alert)}
+            history={vitalHistory.map((r) => r.spo2).filter((v) => v != null)}
             strokeColor="#38bdf8"
             theme={theme}
           />
@@ -309,6 +320,8 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
             min={60}
             max={180}
             alert={nibpAlert}
+            alarmActive={gaugeAlarmLive(nibpAlert)}
+            history={vitalHistory.map((r) => r.sbp).filter((v) => v != null)}
             strokeColor="#f9a8d4"
             theme={theme}
           />
@@ -320,6 +333,8 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
             min={35}
             max={40}
             alert={tempAlert}
+            alarmActive={gaugeAlarmLive(tempAlert)}
+            history={vitalHistory.map((r) => r.temp).filter((v) => v != null)}
             strokeColor="#fcd34d"
             theme={theme}
           />
@@ -327,14 +342,21 @@ export default function PatientMonitor({ patientId, liveEvent, connectionStatus 
           <div className={`col-span-2 mt-auto border-t p-2 lg:col-span-1 ${borderColor}`}>
             <button
               type="button"
-              onClick={() => setAudioEnabled((v) => !v)}
-              className={`w-full border px-2 py-2 text-[10px] font-bold uppercase tracking-widest ${
-                isDark
-                  ? "border-slate-700 bg-black text-slate-400 hover:border-slate-500"
-                  : "border-slate-300 bg-slate-50 text-slate-600 hover:border-slate-400"
-              }`}
+              onClick={alarms.acknowledge}
+              disabled={alarms.disabled}
+              className={`w-full border px-2 py-2 text-[10px] font-bold uppercase tracking-widest transition-colors ${
+                alarms.active && !alarms.isSilenced
+                  ? "border-red-600 bg-red-600 text-black hover:bg-red-500"
+                  : alarms.isSilenced
+                    ? isDark
+                      ? "border-amber-700 bg-amber-950/40 text-amber-400"
+                      : "border-amber-400 bg-amber-50 text-amber-700"
+                    : isDark
+                      ? "border-slate-800 bg-black text-slate-600"
+                      : "border-slate-200 bg-slate-50 text-slate-400"
+              } ${alarms.disabled ? "cursor-default" : "cursor-pointer"}`}
             >
-              {audioEnabled ? "Mute Alarms" : "Alarms Muted"}
+              {alarms.label}
             </button>
           </div>
         </aside>

@@ -1,4 +1,5 @@
 /** Circular vital sign gauge (SpO₂, HR, temp, NIBP). */
+import TrendSparkline from "./TrendSparkline.jsx";
 
 function polarToCartesian(cx, cy, r, angleDeg) {
   const rad = ((angleDeg - 90) * Math.PI) / 180;
@@ -20,6 +21,8 @@ export default function VitalGauge({
   min = 0,
   max = 100,
   alert = false,
+  alarmActive = false,
+  history = null,
   strokeColor = "#34d399",
   size = 88,
   theme = "dark",
@@ -38,7 +41,9 @@ export default function VitalGauge({
     <div
       className={`flex flex-col items-center border-b px-2 py-3 ${
         theme === "light" ? "border-slate-200" : "border-slate-800"
-      } ${alert ? (theme === "light" ? "bg-red-50" : "bg-red-950/30") : ""}`}
+      } ${alert ? (theme === "light" ? "bg-red-50" : "bg-red-950/30") : ""} ${
+        alarmActive ? "animate-pulse ring-1 ring-inset ring-red-500" : ""
+      }`}
     >
       <span
         className={`mb-1 text-[10px] font-bold uppercase tracking-widest ${
@@ -88,6 +93,11 @@ export default function VitalGauge({
           )}
         </div>
       </div>
+      {history && history.length > 1 && (
+        <div className="mt-1.5 w-full px-1">
+          <TrendSparkline values={history} color={activeColor} height={18} theme={theme} />
+        </div>
+      )}
     </div>
   );
 }
