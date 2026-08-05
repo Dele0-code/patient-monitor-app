@@ -37,6 +37,9 @@ fi
 
 # --- 2. Mosquitto broker -----------------------------------------------------
 echo "==> Configuring mosquitto..."
+# Remove a stale drop-in from a previous setup that also binds :1883 — two
+# listeners on the same port make mosquitto exit before it can start.
+sudo rm -f /etc/mosquitto/conf.d/default.conf
 sudo cp "$DEPLOY_DIR/mosquitto.conf" /etc/mosquitto/conf.d/patient-monitor.conf
 sudo systemctl enable mosquitto
 sudo systemctl restart mosquitto
