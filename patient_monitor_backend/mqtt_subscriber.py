@@ -27,7 +27,7 @@ LLM_THROTTLE_SEC = 45.0
 SEVERITY_ESCALATE_TICKS = 10
 SEVERITY_DEESCALATE_TICKS = 35
 
-ollama_client = ollama.Client(host=OLLAMA_HOST, timeout=15)
+ollama_client = ollama.Client(host=OLLAMA_HOST, timeout=45)
 
 _last_rule_severity: dict[str, str] = {}
 _last_llm_assessment: dict[str, dict[str, Any]] = {}
